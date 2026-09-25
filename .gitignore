@@ -1,0 +1,29 @@
+# Données volumineuses - ne jamais committer les fichiers Excel sources
+input/*.xlsx
+input/*.xlsb
+data/raw/*.xlsx
+data/raw/*.xlsb
+data/interim/
+data/output/*.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests
+.pytest_cache/
+.coverage
+output/

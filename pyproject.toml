@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pcf-extraction"
+version = "0.2.0"
+description = "Extraction et analyse des composants SBM pour le calcul des facteurs d'émission (PCF)"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+pcf-extract = "pcf_extraction.cli:main"
+pcf-collecte = "pcf_extraction.cli:main_collecte"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
