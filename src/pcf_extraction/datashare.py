@@ -158,13 +158,13 @@ COMPONENT_COLUMNS: list[tuple[str, str]] = (
 HEADER_RENAMES = {"Transformation Energy Type": "Transformation Energy Name"}
 
 DQR_GUIDE_SHEET = "DQR_Guide"
-SHEET_ORDER = ["UserGuide", "Product", "Component", DQR_GUIDE_SHEET]
-# Couleur des onglets (nom des onglets), alignée sur les blocs.
+SHEET_ORDER = ["UserGuide", DQR_GUIDE_SHEET, "Product", "Component"]
+# Couleur des onglets (nom des onglets), validée par SBM (fichier v0.92_mod2).
 TAB_COLORS: dict[str, str] = {
-    "UserGuide": "FF808080",
+    "UserGuide": "FF1F497D",
+    DQR_GUIDE_SHEET: "FF1F497D",
     "Product": "FF13501B",
     "Component": "FF75A67C",
-    DQR_GUIDE_SHEET: "FF538DD5",
 }
 
 
@@ -298,7 +298,7 @@ def _number_formats(columns: list[tuple[str, str]]) -> dict[int, str]:
     }
 
 
-def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]]):
+def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]], data_end_row: int = DATA_END_ROW):
     if sheet in wb.sheetnames:
         del wb[sheet]
     ws = wb.create_sheet(sheet)
@@ -316,7 +316,7 @@ def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]]):
             ws.column_dimensions[letter].width = 18
     ws.row_dimensions[HEADER_ROW].height = 60
     formats = _number_formats(columns)
-    for row in range(DATA_START_ROW, DATA_END_ROW + 1):
+    for row in range(DATA_START_ROW, data_end_row + 1):
         values = _defaults(sheet, columns, row)
         for idx, (header, _) in enumerate(columns, start=1):
             if header in values:
@@ -337,7 +337,7 @@ def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]]):
     dv = DataValidation(type="list", formula1='"1,2,3,4,5"', allow_blank=True)
     for header in ("Transformation GEO DQR", "Transformation TECH DQR", "Transformation TEMP DQR"):
         col = _column_of(columns, header)
-        dv.add(f"{get_column_letter(col)}{DATA_START_ROW}:{get_column_letter(col)}{DATA_END_ROW}")
+        dv.add(f"{get_column_letter(col)}{DATA_START_ROW}:{get_column_letter(col)}{data_end_row}")
     ws.add_data_validation(dv)
     grouping_idx = _column_of(columns, "Product Details" if sheet == "Product" else "Component Details")
     ws.freeze_panes = f"{get_column_letter(grouping_idx + 1)}{DATA_START_ROW}"
@@ -370,25 +370,62 @@ def _copy_input_data(wb, input_path: Path) -> None:
                     dst_ws.cell(row=r, column=idx, value=value)
 
 
+def _write_rows(ws, columns: list[tuple[str, str]], rows: list[dict]) -> None:
+    """Écrit des lignes de données pré-remplies à partir de la ligne 2."""
+    for offset, row in enumerate(rows, start=DATA_START_ROW):
+        for header, value in row.items():
+            if value is None:
+                continue
+            try:
+                col = _column_of(columns, header)
+            except KeyError:
+                continue
+            ws.cell(row=offset, column=col, value=value)
+
+
 def apply_v093(
     input_path: str | Path,
     output_path: str | Path,
     template_path: str | Path | None = None,
-) -> None:
+    spec_path: str | Path | None = None,
+    material_path: str | Path | None = None,
+) -> tuple[int, int] | None:
     """Génère le fichier de collecte v0.93 depuis un fichier v0.9x.
 
     Le template (guides UserGuide/DQR_Guide formatés par SBM, ordre des onglets)
     sert de base ; les onglets Product et Component sont reconstruits selon la
     spec v0.93 puis les données du fichier d'entrée y sont recopiées.
+
+    Si spec_path et material_path sont fournis (spécifications v0.93 + fichier
+    « Material and Packaging - ExtractPourPCF »), les onglets Product et
+    Component sont pré-remplis avec les références LM et leurs composants.
+    Retourne alors (nombre de produits, nombre de composants) pré-remplis.
     """
     template = Path(template_path) if template_path else DEFAULT_TEMPLATE
     wb = load_workbook(template)
-    _build_sheet(wb, "Product", PRODUCT_COLUMNS)
-    _build_sheet(wb, "Component", COMPONENT_COLUMNS)
+    data_end_row = DATA_END_ROW
+    product_rows = component_rows = None
+    if spec_path and material_path:
+        from .prefill import build_prefill_rows
+
+        product_rows, component_rows = build_prefill_rows(Path(spec_path), Path(material_path))
+        data_end_row = max(
+            DATA_END_ROW,
+            DATA_START_ROW + len(product_rows) - 1,
+            DATA_START_ROW + len(component_rows) - 1,
+        )
+    _build_sheet(wb, "Product", PRODUCT_COLUMNS, data_end_row)
+    _build_sheet(wb, "Component", COMPONENT_COLUMNS, data_end_row)
     order = {name: i for i, name in enumerate(SHEET_ORDER)}
     wb._sheets.sort(key=lambda ws: order.get(ws.title, len(order)))
     for ws in wb.worksheets:
         if ws.title in TAB_COLORS:
             ws.sheet_properties.tabColor = TAB_COLORS[ws.title]
     _copy_input_data(wb, Path(input_path))
+    counts = None
+    if product_rows is not None:
+        _write_rows(wb["Product"], PRODUCT_COLUMNS, product_rows)
+        _write_rows(wb["Component"], COMPONENT_COLUMNS, component_rows)
+        counts = (len(product_rows), len(component_rows))
     wb.save(output_path)
+    return counts

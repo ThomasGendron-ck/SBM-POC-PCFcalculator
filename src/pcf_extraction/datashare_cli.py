@@ -29,6 +29,17 @@ def main_datashare(argv=None) -> int:
         default=None,
         help=f"Template des guides (défaut : {DEFAULT_TEMPLATE})",
     )
+    parser.add_argument(
+        "--spec",
+        default=None,
+        help="Spécifications v0.93 (.xlsx) : pré-remplissage des produits LM",
+    )
+    parser.add_argument(
+        "--material",
+        default=None,
+        help="Fichier « Material and Packaging - ExtractPourPCF » (.xlsx) : "
+        "pré-remplissage des produits et composants",
+    )
     args = parser.parse_args(argv)
     if not Path(args.input).is_file():
         print(f"Erreur : fichier input introuvable : {args.input}", file=sys.stderr)
@@ -36,7 +47,15 @@ def main_datashare(argv=None) -> int:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     print(f"Génération selon la spec v0.93 : {args.input} -> {output}")
-    apply_v093(args.input, output, template_path=args.template)
+    counts = apply_v093(
+        args.input,
+        output,
+        template_path=args.template,
+        spec_path=args.spec,
+        material_path=args.material,
+    )
+    if counts is not None:
+        print(f"Pré-remplissage : {counts[0]} produits, {counts[1]} composants.")
     print("Terminé (layout v0.93, formules, listes déroulantes, guides SBM).")
     return 0
 

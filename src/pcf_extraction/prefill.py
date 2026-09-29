@@ -1,0 +1,170 @@
+"""Pré-remplissage des onglets Product et Component du fichier de collecte.
+
+Sources (bibliothèque SBM) :
+- « POC Calculateur - Spécifications - v0.93.xlsx », onglet « Produits LM » :
+  la liste des références Leroy Merlin (une ligne par produit fini) ;
+- « SBM LS Europe - BC FY24-25 - Material and Packaging - vF - ExtractPourPCF.xlsx » :
+  MasterBase_Products (attributs produit/composant), MasterBase_BOM (nomenclatures),
+  CK_MaterialPurchase (fournisseurs, matières premières), Category_Param
+  (description des catégories SAGE).
+
+Règles de périmètre (identiques au pipeline pcf-collecte v0.74) :
+- composants = alternatives BOMALT toutes sauf 2 et 9, statut actif (USESTA_0 = 2) ;
+- dédoublement : un couple produit/composant présent dans plusieurs alternatives
+  est retenu à la plus petite alternative ;
+- onglet Component : une ligne par composant unique du périmètre.
+"""
+
+from pathlib import Path
+
+import pandas as pd
+
+BOM_EXCLUDED_ALTERNATIVES = {2, 9}
+BOM_ACTIVE_STATUS = 2
+LM_SPEC_SHEET = "Produits LM"
+LM_SKU_COL = "Num Reference fournisseur "
+LM_DESIGNATION_COL = "Designation article "
+
+
+def _text(value) -> str | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _num(value) -> float | None:
+    number = pd.to_numeric(value, errors="coerce")
+    if pd.isna(number):
+        return None
+    return float(number)
+
+
+def load_lm_products(spec_path: str | Path) -> pd.DataFrame:
+    """Liste des références LM depuis l'onglet « Produits LM » de la spec."""
+    df = pd.read_excel(spec_path, sheet_name=LM_SPEC_SHEET)
+    df = df.rename(columns={LM_SKU_COL: "SKU", LM_DESIGNATION_COL: "Designation"})
+    df["SKU"] = df["SKU"].map(_text)
+    df = df.dropna(subset=["SKU"]).drop_duplicates(subset="SKU")
+    return df[["SKU", "Designation"]]
+
+
+def _load_masterbase(material_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    products = pd.read_excel(material_path, sheet_name="MasterBase_Products", header=11)
+    bom = pd.read_excel(material_path, sheet_name="MasterBase_BOM", header=11)
+    purchases = pd.read_excel(material_path, sheet_name="CK_MaterialPurchase", header=11)
+    categories = pd.read_excel(material_path, sheet_name="Category_Param")
+    products["SKU"] = products["SKU"].map(_text)
+    products = products.dropna(subset=["SKU"]).drop_duplicates(subset="SKU").set_index("SKU", drop=False)
+    bom = bom.dropna(subset=["ITMREF", "CPNITMREF"])
+    for col in ("ITMREF", "CPNITMREF"):
+        bom[col] = bom[col].map(_text)
+    bom["BOMALT"] = pd.to_numeric(bom["BOMALT"], errors="coerce")
+    bom["USESTA_0"] = pd.to_numeric(bom["USESTA_0"], errors="coerce")
+    bom = bom.sort_values(["ITMREF", "CPNITMREF", "BOMALT"])
+    purchases["PRODUCT"] = purchases["PRODUCT"].map(_text)
+    purchases = purchases.dropna(subset=["PRODUCT"])
+    return products, bom, purchases, categories
+
+
+def build_prefill_rows(
+    spec_path: str | Path,
+    material_path: str | Path,
+) -> tuple[list[dict], list[dict]]:
+    """Construit les lignes Product et Component à pré-remplir.
+
+    Retourne (product_rows, component_rows) : une ligne par référence LM et une
+    ligne par composant unique du périmètre BOM élargi.
+    """
+    lm = load_lm_products(spec_path)
+    products, bom, purchases, categories = _load_masterbase(Path(material_path))
+    category_names = dict(zip(categories["Category_Code"], categories["Category_Name"]))
+
+    bom_active = bom[
+        (~bom["BOMALT"].isin(BOM_EXCLUDED_ALTERNATIVES)) & (bom["USESTA_0"] == BOM_ACTIVE_STATUS)
+    ]
+    bom_active = bom_active.drop_duplicates(subset=["ITMREF", "CPNITMREF"], keep="first")
+
+    purchase_suppliers = (
+        purchases.dropna(subset=["SUPPLIER_CODE"])
+        .sort_values("SUPPLIER_CODE")
+        .drop_duplicates(subset=["PRODUCT"], keep="first")
+        .set_index("PRODUCT", drop=False)
+    )
+    raw_materials = (
+        purchases.dropna(subset=["RawMat_SubFamily"])
+        .sort_values("Weight_KGTotal", ascending=False)
+        .drop_duplicates(subset=["PRODUCT"], keep="first")
+        .set_index("PRODUCT", drop=False)
+    )
+
+    product_rows: list[dict] = []
+    for _, lmr in lm.iterrows():
+        sku = lmr["SKU"]
+        prod = products.loc[sku] if sku in products.index else None
+
+        def attr(column: str):
+            if prod is None:
+                return None
+            return _text(prod[column]) if column in products.columns else None
+
+        category = attr("Category")
+        supplier_code = supplier_name = None
+        if sku in purchase_suppliers.index:
+            row = purchase_suppliers.loc[sku]
+            supplier_code = _text(row["SUPPLIER_CODE"])
+            supplier_name = _text(row["SUPPLIER_NAME"])
+        product_rows.append(
+            {
+                "Product SKU": sku,
+                "Product Designation": _text(lmr["Designation"]) or attr("SKU Designation"),
+                "Category Code": category,
+                "Category description": category_names.get(category),
+                "Supplier Code": supplier_code,
+                "Supplier Name": supplier_name,
+                "Pack Unit Box": None if prod is None else _num(prod["Pack unit box"]),
+                "Net Weight": None if prod is None else _num(prod["Item weight"]),
+                "Net Weight Unit": attr("Weight unit"),
+                "Gross Weight": None if prod is None else _num(prod["GROSS_WEIGHT0"]),
+                "Gross Weight Unit": attr("Weight unit"),
+                "Stock unit": attr("PCU0"),
+            }
+        )
+
+    lm_skus = set(lm["SKU"])
+    component_refs = sorted(set(bom_active[bom_active["ITMREF"].isin(lm_skus)]["CPNITMREF"]))
+    component_rows: list[dict] = []
+    for sku in component_refs:
+        prod = products.loc[sku] if sku in products.index else None
+
+        def attr(column: str):
+            if prod is None:
+                return None
+            return _text(prod[column]) if column in products.columns else None
+
+        category = attr("Category")
+        supplier_code = supplier_name = raw_material = None
+        if sku in purchase_suppliers.index:
+            row = purchase_suppliers.loc[sku]
+            supplier_code = _text(row["SUPPLIER_CODE"])
+            supplier_name = _text(row["SUPPLIER_NAME"])
+            raw_material = _text(row["RawMat_SubFamily"])
+        component_rows.append(
+            {
+                "Component SKU": sku,
+                "Component Designation": attr("SKU Designation"),
+                "Category Code": category,
+                "Category description": category_names.get(category),
+                "Supplier Code": supplier_code,
+                "Supplier Name": supplier_name,
+                "Pack unit box": None if prod is None else _num(prod["Pack unit box"]),
+                "Net Weight": None if prod is None else _num(prod["Item weight"]),
+                "Net Weight Unit": attr("Weight unit"),
+                "Gross Weight": None if prod is None else _num(prod["GROSS_WEIGHT0"]),
+                "Gross Weight Unit": attr("Weight unit"),
+                "Stock unit": attr("PCU0"),
+                "Raw Material (MB Product)": raw_material,
+                "UVP description": attr("ZUVP_DES"),
+            }
+        )
+    return product_rows, component_rows

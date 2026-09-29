@@ -141,7 +141,7 @@ def test_dqr_guide_title_fill(tmp_path):
     wb = load_workbook(out_path)
     dqr = wb[DQR_GUIDE_SHEET]
     for coord in ("A4", "D4", "A12", "D12"):
-        assert dqr[coord].fill.fgColor.rgb == "FF538DD5"
+        assert dqr[coord].fill.fgColor.rgb == "FF13501B"
 
 
 def test_guides_format_preserved(tmp_path):
@@ -193,3 +193,46 @@ def test_real_file_if_available(tmp_path):
     comp2 = wb["Component"]
     by_header_c = {c.value: c for c in comp2[1]}
     assert by_header_c["UVP description"].fill.fgColor.rgb == BLOCK_COLORS["Description du composant"]
+
+
+def test_prefill(tmp_path):
+    spec = Path(__file__).resolve().parents[1] / "input" / "Spec v0.93.xlsx"
+    material = (
+        Path(__file__).resolve().parents[1]
+        / "input"
+        / "MaterialPackaging_ExtractPourPCF.xlsx"
+    )
+    if not spec.is_file() or not material.is_file():
+        return
+    in_path = _make_workbook(tmp_path)
+    out_path = tmp_path / "out_prefilled.xlsx"
+    counts = apply_v093(
+        in_path,
+        out_path,
+        template_path=TEMPLATE,
+        spec_path=spec,
+        material_path=material,
+    )
+    assert counts is not None
+    n_products, n_components = counts
+    assert n_products == 217
+    assert n_components > 900
+
+    wb = load_workbook(out_path)
+    prod = wb["Product"]
+    headers = [c.value for c in prod[1]]
+    sku_col = headers.index("Product SKU") + 1
+    skus = [prod.cell(row=r, column=sku_col).value for r in range(2, 2 + n_products)]
+    assert skus[0] is not None and all(s for s in skus)
+    assert "SORHOY15" in skus
+    comp = wb["Component"]
+    headers_c = [c.value for c in comp[1]]
+    csku_col = headers_c.index("Component SKU") + 1
+    cskus = [comp.cell(row=r, column=csku_col).value for r in range(2, 2 + n_components)]
+    assert cskus[0] is not None
+    assert len(set(cskus)) == n_components
+    # les formules par défaut restent en place sur les lignes pré-remplies
+    dqr_col = headers.index("Transformation DQR value") + 1
+    assert str(prod.cell(row=2, column=dqr_col).value).startswith("=IF(COUNT(")
+    flag_col = headers.index("Data validation flag") + 1
+    assert str(prod.cell(row=2, column=flag_col).value).startswith("=IF(AND(")
