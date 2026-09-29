@@ -1,27 +1,35 @@
 # PCF Extraction — Extraction et analyse des composants SBM
 
-## Mise à jour v0.92 du fichier de collecte LM (pcf-datashare)
+## Génération v0.93 du fichier de collecte LM (pcf-datashare)
 
-La commande `pcf-datashare` met à jour le fichier de collecte LM
-(« SBM - PCF - LM references - Data collection ») vers les spécifications v0.92 :
+La commande `pcf-datashare` génère le fichier de collecte LM
+(« SBM - PCF - LM references - Data collection ») selon les spécifications v0.93 :
 
 ```bash
 pcf-datashare \
   --input "input/SBM - PCF - LM references - Data collection (v0.91).xlsx" \
-  --output "data/output/SBM - PCF - LM references - Data collection v0.92.xlsx"
+  --output "data/output/SBM - PCF - LM references - Data collection v0.93.xlsx"
 ```
 
-- **Couleurs v0.92** (onglet « Fichier de collecte » de la spec) : Produit vert foncé
-  `13501B` (accent3 -0.25, police blanche), Composants `75A67C`, Description du composant
-  `A3C4A7`, PCF fournisseur `FBE3D6`, Impact fabrication fournisseur `F6C6AD`, Flag orange `FFC000` ;
-  les marqueurs GROUPING restent en gris avec titre vertical
-- **Onglet `DQR_Guide` dédié** : grille PACT TECH/GEO/TEMP (scores 1 à 5) et niveaux de
-  qualité de l'onglet `PACT_DQRSpec` de la spec (PACT Methodology 3.0, p. 66), au lieu
-  d'une section DQR dans le UserGuide
-- **UserGuide enrichi** : guide de collecte ligne par ligne (traduction en anglais de
-  l'onglet « Introduction » de la spec) — les 2 niveaux de qualité (Niveau 1 : PCF
-  fournisseur ; Niveau 2 : énergie/procédé), pour chaque question la case à remplir et le
-  responsable de collecte, puis les risques associés à l'estimation des données
+- **Layout v0.93** (Spec_CollectionFile) : Product (50 colonnes) et Component
+  (55 colonnes) — ajout de `Supplier PCF framework`, `Supplier PCF scope`,
+  `Supplier PCF declared unit`, `Transformation Process declared unit`,
+  `Transformation Process location`, `Transformation Energy Type`,
+  `Transformation Energy Consumption`, `Transformation Process Comment` ;
+  champs Energy avant champs Process dans le bloc Transformation
+- **Formules Excel explicites** : `Transformation DQR value` (moyenne GEO/TECH/TEMP),
+  `Transformation GHG` (Process EF × Net Weight × (1 + Scrap Rate)),
+  `Data validation flag` (règles de validation de la spec)
+- **Listes déroulantes** : framework (PACT, TfS, ISO14067, other), scope
+  (Cradle-to-Gate, Cradle-to-Grave), external review (Yes, No), Energy Type,
+  DQR 1-5
+- **Guides au format validé SBM** : les onglets `UserGuide` et `DQR_Guide` sont
+  repris tels quels du template `templates/Data_collection_template.xlsx`
+  (issu du fichier v0.92 corrigé par SBM : contenu, couleurs de cellules et
+  polices, hauteurs de lignes, largeurs de colonnes, fusions de cellules,
+  bordures) ; ordre des onglets UserGuide, Product, Component, DQR_Guide
+- Les données saisies du fichier d'entrée sont recopiées vers le nouveau
+  layout (renommage `Transformation Energy Name` → `Transformation Energy Type`)
 
 Outil d'extraction et d'analyse des composants pour calculer les facteurs d'émission (PCF — Product Carbon Footprint) à partir des fichiers Excel SBM (Bilan Carbone FY24-25).
 

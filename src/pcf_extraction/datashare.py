@@ -1,62 +1,56 @@
-"""Application des spécifications v0.92 au fichier de collecte LM (Product/Component).
+"""Construction du fichier de collecte LM selon les spécifications v0.93.
 
-Mise à jour depuis « POC Calculateur - Spécifications - v0.92.xlsx » :
-- couleurs de remplissage des en-têtes par bloc (résolution des couleurs de thème
-  accent1/accent2/accent3/dk2 avec tints exacts de la spec) ;
-- onglet « DQR_Guide » dédié (grille PACT TECH/GEO/TEMP + niveaux de qualité) ;
-- UserGuide enrichi du guide de collecte ligne par ligne (travail de l'onglet
-  « Introduction » de la spec, traduit en anglais).
+Source : « POC Calculateur - Spécifications - v0.93.xlsx » (Spec_CollectionFile).
+- onglets Product (50 colonnes) et Component (53 colonnes) reconstruits selon la
+  spec v0.93 : blocs Supplier PCF (framework/scope/declared unit ajoutés) et
+  Transformation (declared unit, location, Energy Type/Consumption, Comment
+  ajoutés, champs Energy avant Process) ;
+- formules Excel explicites (Transformation DQR value, Transformation GHG,
+  Data validation flag) conformes aux règles de validation de la spec ;
+- listes déroulantes (framework, scope, external review, DQR 1-5, Energy Type) ;
+- couleurs des en-têtes par bloc (identiques à la maquette « Fichier de
+  collecte » de la spec, inchangée entre v0.92 et v0.93) ;
+- onglets UserGuide et DQR_Guide repris tels quels du template validé par SBM
+  (contenu, couleurs de cellules et polices, hauteurs de lignes, largeurs de
+  colonnes, fusions de cellules, bordures) ;
+- ordre des onglets : UserGuide, Product, Component, DQR_Guide.
 """
 
 from pathlib import Path
 
 from openpyxl import load_workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 HEADER_ROW = 1
-GROUPING_FILL = "FFD9D9D9"
+DATA_START_ROW = 2
+DATA_END_ROW = 201
+DEFAULT_TEMPLATE = Path(__file__).resolve().parents[2] / "templates" / "Data_collection_template.xlsx"
 
-# Couleurs des blocs, résolues depuis les couleurs de thème de la spec v0.92
-# (thème Office : accent1=156082, accent2=E97132, accent3=196B24, dk2=0E2841).
-# Palette de l'onglet « Fichier de collecte » de la spec v0.92 :
-#   Produit = accent3 -0.25 -> 13501B (police blanche)
-#   Composants = accent3 +0.4 -> 75A67C
-#   Description du composant = accent3 +0.6 -> A3C4A7
-#   PCF fournisseur = accent2 +0.8 -> FBE3D6
-#   Impact fabrication fournisseur = accent2 +0.6 -> F6C6AD
-BLOCK_COLORS_V092: dict[str, str] = {
+GROUPING = "GROUPING"
+BLOCK_COLORS: dict[str, str] = {
     "Produit": "FF13501B",
     "Composants": "FF75A67C",
     "Description du composant": "FFA3C4A7",
     "Supplier PCF": "FFFBE3D6",
     "Transformation": "FFF6C6AD",
     "Flag": "FFFFC000",
+    GROUPING: "FFD9D9D9",
 }
-BLOCK_FONT_COLORS_V092: dict[str, str] = {
+BLOCK_FONT_COLORS: dict[str, str] = {
     "Produit": "FFFFFFFF",
     "Composants": "FF000000",
     "Description du composant": "FF000000",
     "Supplier PCF": "FF000000",
     "Transformation": "FF000000",
     "Flag": "FF000000",
+    GROUPING: "FF404040",
 }
+BLOCK_COLORS_V092 = BLOCK_COLORS
+BLOCK_FONT_COLORS_V092 = BLOCK_FONT_COLORS
 
-# Bloc (déterminé par le nom de champ) -> couleur de remplissage de l'en-tête.
-def block_of(header: str, sheet: str = "Product") -> str:
-    if header in ("Data validation flag", "Data validation flag impact"):
-        return "Flag"
-    if header.startswith("Supplier PCF") or header in ("Supplier PDS", "Supplier DQR"):
-        return "Supplier PCF"
-    if header.startswith("Transformation"):
-        return "Transformation"
-    if sheet == "Component" and header in COMPONENT_DESCRIPTION_FIELDS:
-        return "Description du composant"
-    if sheet == "Component":
-        return "Composants"
-    return "Produit"
-
-# Onglet Component : colonnes descriptives (poids, unités, matières) -> bloc
-# « Description du composant » de la spec, les autres -> « Composants ».
+# Onglet Component : colonnes descriptives -> bloc « Description du composant ».
 COMPONENT_DESCRIPTION_FIELDS = {
     "Pack unit box",
     "Net Weight",
@@ -69,181 +63,322 @@ COMPONENT_DESCRIPTION_FIELDS = {
     "UVP description",
 }
 
-# Onglet DQR_Guide : grille PACT (source : onglet PACT_DQRSpec de la spec v0.92,
-# PACT Methodology 3.0 - page 66).
+SUPPLIER_PCF_FIELDS = [
+    "Supplier PCF framework",
+    "Supplier PCF scope",
+    "Supplier PCF declared unit",
+    "Supplier PCF value",
+    "Supplier PCF Unit",
+    "Supplier PDS",
+    "Supplier DQR",
+    "Supplier PCF date",
+    "Supplier PCF source",
+    "Supplier PCF external review",
+]
+TRANSFORMATION_FIELDS = [
+    "Transformation Process declared unit",
+    "Transformation Process location",
+    "Transformation Energy Type",
+    "Transformation Energy Consumption",
+    "Transformation Energy Unit",
+    "Transformation Energy EF Name",
+    "Transformation Energy EF Value",
+    "Transformation Energy EF Unit",
+    "Transformation Energy EF Source",
+    "Transformation Process Name",
+    "Transformation Process EF Name",
+    "Transformation Process EF Value",
+    "Transformation Process EF Unit",
+    "Transformation Process EF Source",
+    "Transformation Process Scrap Rate",
+    "Transformation Process Comment",
+    "Transformation PDS value",
+    "Transformation GEO DQR",
+    "Transformation TECH DQR",
+    "Transformation TEMP DQR",
+    "Transformation DQR value",
+    "Transformation GHG",
+    "Transformation GHG Unit",
+]
+FLAG_FIELDS = ["Data validation flag", "Data validation flag impact"]
+
+# Colonnes par onglet, dans l'ordre de la spec v0.93 (Spec_CollectionFile).
+PRODUCT_COLUMNS: list[tuple[str, str]] = (
+    [
+        ("Product SKU", "Produit"),
+        ("Product Designation", "Produit"),
+        ("Category Code", "Produit"),
+        ("Category description", "Produit"),
+        ("Supplier Code", "Produit"),
+        ("Supplier Name", "Produit"),
+        ("Pack Unit Box", "Produit"),
+        ("Net Weight", "Produit"),
+        ("Net Weight Unit", "Produit"),
+        ("Gross Weight", "Produit"),
+        ("Gross Weight Unit", "Produit"),
+        ("Stock unit", "Produit"),
+        ("Product Details", GROUPING),
+    ]
+    + [(h, "Supplier PCF") for h in SUPPLIER_PCF_FIELDS]
+    + [("Supplier PCF", GROUPING)]
+    + [(h, "Transformation") for h in TRANSFORMATION_FIELDS]
+    + [("Transformation Details", GROUPING)]
+    + [(h, "Flag") for h in FLAG_FIELDS]
+)
+COMPONENT_COLUMNS: list[tuple[str, str]] = (
+    [
+        ("Component SKU", "Composants"),
+        ("Component Designation", "Composants"),
+        ("Category Code", "Composants"),
+        ("Category description", "Composants"),
+        ("Carbon category", "Composants"),
+        ("Carbon sub category", "Composants"),
+        ("Supplier Code", "Composants"),
+        ("Supplier Name", "Composants"),
+        ("UVP description", "Description du composant"),
+        ("Raw Material (MB Product)", "Description du composant"),
+        ("Raw Material - Carbon Footprint", "Description du composant"),
+        ("Pack unit box", "Description du composant"),
+        ("Net Weight", "Description du composant"),
+        ("Net Weight Unit", "Description du composant"),
+        ("Gross Weight", "Description du composant"),
+        ("Gross Weight Unit", "Description du composant"),
+        ("Stock unit", "Description du composant"),
+        ("Component Details", GROUPING),
+    ]
+    + [(h, "Supplier PCF") for h in SUPPLIER_PCF_FIELDS]
+    + [("Supplier PCF", GROUPING)]
+    + [(h, "Transformation") for h in TRANSFORMATION_FIELDS]
+    + [("Transformation Details", GROUPING)]
+    + [(h, "Flag") for h in FLAG_FIELDS]
+)
+
+# Renommage des données d'entrée (v0.9x) vers les en-têtes v0.93 :
+# en-tête v0.93 -> en-tête équivalent du fichier d'entrée.
+HEADER_RENAMES = {"Transformation Energy Type": "Transformation Energy Name"}
+
 DQR_GUIDE_SHEET = "DQR_Guide"
-DQR_GUIDE_ROWS: list[tuple[str, str, str, str, str, str, str]] = [
-    ("Source", "PACT Methodology 3.0 - Page 66", "", "", "", "", ""),
-    ("Link", "https://docs.carbon-transparency.org/", "", "", "", "", ""),
-    ("", "", "", "", "", "", ""),
-    ("Technological representativeness (TECH DQR)", "", "", "Geographical representativeness (GEO DQR)", "", "", ""),
-    ("Score", "Simplified wording", "", "Score", "Simplified wording", "", ""),
-    ("1", "Dataset reflects the exact technology employed (plant-specific process).", "", "1", "Country subdivision where the product is manufactured (e.g., US state, region).", "", ""),
-    ("2", "Same technology, company/site-specific but not necessarily plant-specific.", "", "2", "Country average for the manufacturing country.", "", ""),
-    ("3", "Average for an equivalent technology to the one employed (same technology group).", "", "3", "Regional average including the site (e.g., Europe, Asia, North America).", "", ""),
-    ("4", "Technological proxy (similar but not the same technology, regardless of the supplier).", "", "4", "Global average.", "", ""),
-    ("5", "Different or unknown technology versus the technology actually employed.", "", "5", "Unknown geographical scope, or a country/region not including the manufacturing site.", "", ""),
-    ("", "", "", "", "", "", ""),
-    ("Temporal / Time representativeness (TEMP DQR)", "", "", "Overall DQR evaluation", "", "", ""),
-    ("Score", "Simplified wording", "", "Overall DQR", "Quality level", "", ""),
-    ("1", "Difference of 1 year or less (366 days) between the dataset's reference year and the PCF reference year.", "", "DQR < 1.5", "Excellent quality", "", ""),
-    ("2", "Difference of more than 1 year and up to 2 years (731 days).", "", "1.5 < DQR < 2.0", "Very good quality", "", ""),
-    ("3", "Difference of more than 2 years and up to 3 years (1,096 days).", "", "2.0 < DQR < 3.0", "Good quality", "", ""),
-    ("4", "Difference of more than 3 years and up to 4 years (1,461 days).", "", "3.0 < DQR < 4.0", "Fair quality", "", ""),
-    ("5", "Difference of more than 4 years, or unknown.", "", "DQR > 4.0", "Poor quality", "", ""),
-]
-DQR_GUIDE_HEADER_COLS = (1, 4)
-DQR_GUIDE_SUBHEADER_COLS = (1, 2, 4, 5)
-
-# UserGuide : guide de collecte ligne par ligne (traduction de l'onglet
-# « Introduction » de la spec v0.92).
-USERGUIDE_INTRODUCTION_ROWS: list[tuple[str, str, str, str]] = [
-    ("section", "How to collect the data from suppliers", "", ""),
-    ("text", "To compute robust PCFs for the SBM range, energy data must be collected on the components purchased by SBM.", "", ""),
-    ("text", "Data collection is structured in 2 quality levels:", "", ""),
-    ("text", "Level 1: The supplier already holds the PCF of its component.", "", ""),
-    ("text", "If the supplier has already carried out PCFs or LCAs, it holds the precise figure for the component. The information to request is:", "", ""),
-    ("table_header", "Question to ask", "Field to fill", "Person in charge of the collection", ""),
-    ("table_row", "Do you hold the PCF of [SKU]?", "Component SKU", "SBM", ""),
-    ("table_row", "What is the calculation methodology?", "Supplier PCF framework", "Supplier", ""),
-    ("table_row", "What is the scope of the PCF?", "Supplier PCF scope", "Supplier", ""),
-    ("table_row", "What is the declared (functional) unit of the calculation?", "Supplier PCF declared unit", "Supplier", ""),
-    ("table_row", "What is the PCF value?", "Supplier PCF value", "Supplier", ""),
-    ("table_row", "Do you have the PDS calculation of the PCF? If yes, provide it. (Mandatory data)", "Supplier PDS", "Supplier", ""),
-    ("table_row", "Do you have the DQR calculation of the PCF? If yes, provide it.", "Supplier DQR", "Supplier", ""),
-    ("table_row", "In which year was the PCF calculated?", "Supplier PCF date", "Supplier", ""),
-    ("table_row", "Has this PCF been certified?", "Supplier PCF external review", "Supplier", ""),
-    ("table_row", "Where does the collected data come from?", "Supplier PCF source", "SBM", ""),
-    ("text", "", "", ""),
-    ("text", "Level 2: The supplier knows the energy associated with the manufacture of the component, or its production process.", "", ""),
-    ("text", "The supplier holds the specific energy figure for the component.", "", ""),
-    ("text", "The supplier knows the production process of the component very well.", "", ""),
-    ("text", "The supplier knows its emissions per production line or per site.", "", ""),
-    ("table_header", "Question to ask", "Field to fill", "Person in charge of the collection", ""),
-    ("table_row", "Which component are we referring to?", "Component SKU", "SBM", ""),
-    ("table_row", "What is the unit of the monitored or computed transformation?", "Transformation Process declared unit", "Supplier or SBM", ""),
-    ("table_row", "In which country does the transformation take place?", "Transformation Process location", "Supplier", ""),
-    ("table_row", "What type of energy is used to manufacture the component?", "Transformation Energy Type", "Supplier", ""),
-    ("table_row", "How much energy is used?", "Transformation Energy Consumption", "Supplier", ""),
-    ("table_row", "What is the name of the transformation process used?", "Transformation Process Name", "Supplier", ""),
-    ("table_row", "Is there a scrap rate associated with the process?", "Transformation Process Scrap Rate", "Supplier", ""),
-    ("table_row", "Does the supplier have a comment on the robustness of the information?", "Transformation Process Comment", "Supplier", ""),
-    ("table_row", "Source of the data (monitored, computed or estimated)", "Transformation Energy EF Source", "SBM", ""),
-    ("text", "", "", ""),
-    ("section", "Risks associated with data estimation", "", ""),
-    ("text", "1. Using a proxy far from reality, therefore over- or under-estimating the value.", "", ""),
-    ("text", "2. Not finding a proxy for the requested process.", "", ""),
-    ("text", "3. Making a site-level consumption approximation, which under-estimates high-consuming products and over-estimates low-consuming ones.", "", ""),
-    ("text", "The main risk for SBM is to over/under-evaluate products. PCF quality is lost and there is a risk of missing the right orders of magnitude for some product typologies.", "", ""),
-]
+SHEET_ORDER = ["UserGuide", "Product", "Component", DQR_GUIDE_SHEET]
 
 
-GROUPING_MARKERS = {"Product Details", "Component Details", "Supplier PCF", "Transformation Details"}
+def block_of(header: str, sheet: str = "Product") -> str:
+    """Bloc spec (couleur d'en-tête) associé à un champ."""
+    if header in FLAG_FIELDS:
+        return "Flag"
+    if header in SUPPLIER_PCF_FIELDS or header == "Supplier PCF":
+        return "Supplier PCF"
+    if header.startswith("Transformation"):
+        return "Transformation"
+    if sheet == "Component":
+        if header in COMPONENT_DESCRIPTION_FIELDS:
+            return "Description du composant"
+        return "Composants"
+    return "Produit"
 
 
-def _set_block_fill(ws, header: str, cell, sheet: str) -> None:
-    block = block_of(header, sheet)
-    fill = PatternFill("solid", fgColor=BLOCK_COLORS_V092[block])
-    color = BLOCK_FONT_COLORS_V092[block]
-    cell.fill = fill
-    cell.font = Font(color=color, bold=True)
-    cell.alignment = Alignment(vertical="center", wrap_text=True)
+def _column_of(columns: list[tuple[str, str]], header: str) -> int:
+    for idx, (name, _) in enumerate(columns, start=1):
+        if name == header:
+            return idx
+    raise KeyError(header)
 
 
-def update_colors(wb) -> None:
-    """Applique les couleurs v0.92 aux en-têtes Product/Component."""
-    for sheet in ("Product", "Component"):
-        if sheet not in wb.sheetnames:
+def _cell(columns: list[tuple[str, str]], header: str, row: int) -> str:
+    return f"{get_column_letter(_column_of(columns, header))}{row}"
+
+
+def _header_style(cell, block: str) -> None:
+    cell.fill = PatternFill("solid", fgColor=BLOCK_COLORS[block])
+    cell.font = Font(color=BLOCK_FONT_COLORS[block], bold=True)
+    if block == GROUPING:
+        cell.alignment = Alignment(vertical="center", textRotation=90, wrap_text=True)
+    else:
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+
+
+def _defaults(sheet: str, columns: list[tuple[str, str]], row: int) -> dict[str, object]:
+    pcf_unit = "kgCO2e/product" if sheet == "Product" else "kgCO2e/component"
+    values: dict[str, object] = {
+        "Net Weight Unit": "kg",
+        "Gross Weight Unit": "kg",
+        "Supplier PCF Unit": pcf_unit,
+        "Supplier PCF source": "Supplier",
+        "Supplier PCF external review": "No",
+        "Transformation Energy Unit": "kW",
+        "Transformation Energy EF Unit": "kgCO2e/kW",
+        "Transformation Process EF Unit": "kgCO2e",
+        "Transformation PDS value": 0,
+        "Transformation GHG Unit": pcf_unit,
+    }
+    geo = _cell(columns, "Transformation GEO DQR", row)
+    tech = _cell(columns, "Transformation TECH DQR", row)
+    temp = _cell(columns, "Transformation TEMP DQR", row)
+    values["Transformation DQR value"] = (
+        f'=IF(COUNT({geo},{tech},{temp})=0,"",ROUND(AVERAGE({geo},{tech},{temp}),3))'
+    )
+    ef = _cell(columns, "Transformation Process EF Value", row)
+    net = _cell(columns, "Net Weight", row)
+    scrap = _cell(columns, "Transformation Process Scrap Rate", row)
+    values["Transformation GHG"] = (
+        f'=IF({ef}="","",ROUND({ef}*IF({net}="",0,{net})*(1+IF({scrap}="",0,{scrap})),5))'
+    )
+    values["Data validation flag"] = _flag_formula(sheet, columns, row)
+    return values
+
+
+def _flag_formula(sheet: str, columns: list[tuple[str, str]], row: int) -> str:
+    def c(header: str) -> str:
+        return _cell(columns, header, row)
+
+    sku = c("Product SKU" if sheet == "Product" else "Component SKU")
+    parts = [
+        f'IF(AND({sku}<>"",{c("Supplier Code")}=""),"Supplier code empty (High);","")',
+        _pds_flag(c("Supplier PDS")),
+        _dqr_flag(c("Supplier DQR")),
+        (
+            f'IF(AND({c("Supplier PCF value")}<>"",OR({c("Supplier PCF value")}<=0,'
+            f'{c("Supplier PCF value")}>100)),"Unusual PCF value might be wrong (High);","")'
+        ),
+        _pds_flag(c("Transformation PDS value")),
+        _dqr_flag(c("Transformation DQR value")),
+        (
+            f'IF(AND({c("Transformation Process Scrap Rate")}<>"",'
+            f'OR({c("Transformation Process Scrap Rate")}>1,'
+            f'{c("Transformation Process Scrap Rate")}<0)),"Incorrect scrap rate (High);",'
+            f'IF(AND({sku}<>"",{c("Transformation Process Scrap Rate")}=0),'
+            f'"No scrap rate (No impact);",""))'
+        ),
+    ]
+    if sheet == "Component":
+        parts.append(
+            f'IF(AND({sku}<>"",{c("UVP description")}="",'
+            f'{c("Raw Material (MB Product)")}="",'
+            f'{c("Raw Material - Carbon Footprint")}=""),'
+            f'"No raw material available (High);","")'
+        )
+    return "=" + "&".join(parts) + '&""'
+
+
+def _pds_flag(ref: str) -> str:
+    return (
+        f'IF(AND({ref}<>"",OR({ref}>1,{ref}<0)),"Incorrect PDS value (High);",'
+        f'IF(AND({ref}<>"",{ref}>0.5),"High PDS value (Medium);",""))'
+    )
+
+
+def _dqr_flag(ref: str) -> str:
+    return (
+        f'IF(AND({ref}<>"",OR({ref}>5,{ref}<1)),"Incorrect DQR value (High);",'
+        f'IF(AND({ref}<>"",{ref}>4),"Incorrect DQR value (Medium);",'
+        f'IF(AND({ref}<>"",{ref}>3),"Incorrect DQR value (Low);","")))'
+    )
+
+
+def _number_formats(columns: list[tuple[str, str]]) -> dict[int, str]:
+    formats = {
+        "Supplier PDS": "0.00%",
+        "Supplier DQR": "0.000",
+        "Supplier PCF date": "mm-dd-yy",
+        "Transformation Process Scrap Rate": "0.00%",
+        "Transformation PDS value": "0.00%",
+        "Transformation GEO DQR": "0.000",
+        "Transformation TECH DQR": "0.000",
+        "Transformation TEMP DQR": "0.000",
+        "Transformation DQR value": "0.000",
+    }
+    return {
+        _column_of(columns, header): fmt for header, fmt in formats.items()
+    }
+
+
+def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]]):
+    if sheet in wb.sheetnames:
+        del wb[sheet]
+    ws = wb.create_sheet(sheet)
+    for idx, (header, block) in enumerate(columns, start=1):
+        cell = ws.cell(row=HEADER_ROW, column=idx, value=header)
+        _header_style(cell, block)
+        letter = get_column_letter(idx)
+        if block == GROUPING:
+            ws.column_dimensions[letter].width = 3.43
+        elif header == "Data validation flag":
+            ws.column_dimensions[letter].width = 45
+        elif header == "Data validation flag impact":
+            ws.column_dimensions[letter].width = 15
+        else:
+            ws.column_dimensions[letter].width = 18
+    ws.row_dimensions[HEADER_ROW].height = 60
+    formats = _number_formats(columns)
+    for row in range(DATA_START_ROW, DATA_END_ROW + 1):
+        values = _defaults(sheet, columns, row)
+        for idx, (header, _) in enumerate(columns, start=1):
+            if header in values:
+                ws.cell(row=row, column=idx, value=values[header])
+            if idx in formats:
+                ws.cell(row=row, column=idx).number_format = formats[idx]
+    list_rules = {
+        "Supplier PCF framework": '"PACT,TfS,ISO14067,other"',
+        "Supplier PCF scope": '"Cradle-to-Gate,Cradle-to-Grave"',
+        "Supplier PCF external review": '"Yes,No"',
+        "Transformation Energy Type": '"electricity,renewable certified electricity,natural gas"',
+    }
+    for header, formula in list_rules.items():
+        dv = DataValidation(type="list", formula1=formula, allow_blank=True)
+        col = _column_of(columns, header)
+        dv.add(f"{get_column_letter(col)}{DATA_START_ROW}:{get_column_letter(col)}{DATA_END_ROW}")
+        ws.add_data_validation(dv)
+    dv = DataValidation(type="list", formula1='"1,2,3,4,5"', allow_blank=True)
+    for header in ("Transformation GEO DQR", "Transformation TECH DQR", "Transformation TEMP DQR"):
+        col = _column_of(columns, header)
+        dv.add(f"{get_column_letter(col)}{DATA_START_ROW}:{get_column_letter(col)}{DATA_END_ROW}")
+    ws.add_data_validation(dv)
+    grouping_idx = _column_of(columns, "Product Details" if sheet == "Product" else "Component Details")
+    ws.freeze_panes = f"{get_column_letter(grouping_idx + 1)}{DATA_START_ROW}"
+    return ws
+
+
+def _copy_input_data(wb, input_path: Path) -> None:
+    """Recopie les données saisies du fichier d'entrée vers le nouveau layout."""
+    src = load_workbook(input_path, data_only=False)
+    for sheet, columns in (("Product", PRODUCT_COLUMNS), ("Component", COMPONENT_COLUMNS)):
+        if sheet not in src.sheetnames or sheet not in wb.sheetnames:
             continue
-        ws = wb[sheet]
-        for cell in ws[HEADER_ROW]:
-            header = cell.value
-            if header is None:
+        src_ws, dst_ws = src[sheet], wb[sheet]
+        src_headers = {
+            (c.value or "").strip(): c.column
+            for c in src_ws[HEADER_ROW]
+            if c.value is not None
+        }
+        for row in src_ws.iter_rows(min_row=DATA_START_ROW, max_row=DATA_END_ROW):
+            if not any(c.value is not None for c in row):
                 continue
-            if header in GROUPING_MARKERS:
-                cell.fill = PatternFill("solid", fgColor=GROUPING_FILL)
-                cell.font = Font(color="FF404040", bold=True)
-                cell.alignment = Alignment(vertical="center", textRotation=90, wrap_text=True)
-                continue
-            _set_block_fill(ws, header, cell, sheet)
+            r = row[0].row
+            for idx, (header, _) in enumerate(columns, start=1):
+                old = HEADER_RENAMES.get(header, header)
+                col = src_headers.get(old)
+                if col is None:
+                    continue
+                value = src_ws.cell(row=r, column=col).value
+                if value is not None and not str(value).startswith("="):
+                    dst_ws.cell(row=r, column=idx, value=value)
 
 
-def add_dqr_guide(wb) -> None:
-    """Crée l'onglet DQR_Guide dédié (grille PACT + niveaux de qualité)."""
-    if DQR_GUIDE_SHEET in wb.sheetnames:
-        del wb[DQR_GUIDE_SHEET]
-    ws = wb.create_sheet(DQR_GUIDE_SHEET)
-    for r, row_vals in enumerate(DQR_GUIDE_ROWS, start=1):
-        for c, val in enumerate(row_vals, start=1):
-            if val != "":
-                ws.cell(row=r, column=c, value=val)
-    for col_idx in DQR_GUIDE_SUBHEADER_COLS:
-        cell = ws.cell(row=5, column=col_idx)
-        cell.font = Font(bold=True)
-    for r in (4, 12):
-        for col_idx in (1, 4):
-            cell = ws.cell(row=r, column=col_idx)
-            cell.font = Font(bold=True)
-            cell.fill = PatternFill("solid", fgColor=BLOCK_COLORS_V092["Produit"])
-            cell.font = Font(bold=True, color="FFFFFFFF")
-    for r in (5, 13):
-        for col_idx in DQR_GUIDE_SUBHEADER_COLS:
-            cell = ws.cell(row=r, column=col_idx)
-            cell.font = Font(bold=True)
-    ws.column_dimensions["A"].width = 10
-    ws.column_dimensions["B"].width = 60
-    ws.column_dimensions["C"].width = 3
-    ws.column_dimensions["D"].width = 10
-    ws.column_dimensions["E"].width = 60
-    ws.column_dimensions["F"].width = 3
-    ws.column_dimensions["G"].width = 18
-    for row in ws.iter_rows(min_row=4, max_row=18, min_col=1, max_col=7):
-        for cell in row:
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
-    thin = Side(style="thin", color="FFB0B0B0")
-    for row in ws.iter_rows(min_row=5, max_row=18, min_col=1, max_col=5):
-        for cell in row:
-            cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+def apply_v093(
+    input_path: str | Path,
+    output_path: str | Path,
+    template_path: str | Path | None = None,
+) -> None:
+    """Génère le fichier de collecte v0.93 depuis un fichier v0.9x.
 
-
-def update_userguide(wb) -> None:
-    """Ajoute le guide de collecte ligne par ligne (onglet Introduction traduit) au UserGuide."""
-    if "UserGuide" not in wb.sheetnames:
-        return
-    ws = wb["UserGuide"]
-    start = ws.max_row + 2
-    bold_font = Font(bold=True, size=14)
-    header_fill = PatternFill("solid", fgColor=BLOCK_COLORS_V092["Produit"])
-    thin = Side(style="thin", color="FFB0B0B0")
-    for i, (kind, *vals) in enumerate(USERGUIDE_INTRODUCTION_ROWS):
-        r = start + i
-        if kind == "section":
-            cell = ws.cell(row=r, column=2, value=vals[0])
-            cell.font = bold_font
-        elif kind == "text":
-            cell = ws.cell(row=r, column=2, value=vals[0])
-            cell.alignment = Alignment(wrap_text=True, vertical="top")
-            ws.row_dimensions[r].height = 30 if len(vals[0]) > 90 else None
-        elif kind == "table_header":
-            for j, v in enumerate(vals[:3]):
-                cell = ws.cell(row=r, column=2 + j, value=v)
-                cell.font = Font(bold=True, color="FFFFFFFF")
-                cell.fill = header_fill
-                cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
-        elif kind == "table_row":
-            for j, v in enumerate(vals[:3]):
-                cell = ws.cell(row=r, column=2 + j, value=v)
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
-                cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    ws.column_dimensions["B"].width = 80
-    ws.column_dimensions["C"].width = 40
-    ws.column_dimensions["D"].width = 30
-
-
-def apply_v092(input_path: str | Path, output_path: str | Path) -> None:
-    """Met à jour un fichier de collecte LM (v0.9x) vers la mise en forme v0.92."""
-    wb = load_workbook(input_path)
-    update_colors(wb)
-    add_dqr_guide(wb)
-    update_userguide(wb)
+    Le template (guides UserGuide/DQR_Guide formatés par SBM, ordre des onglets)
+    sert de base ; les onglets Product et Component sont reconstruits selon la
+    spec v0.93 puis les données du fichier d'entrée y sont recopiées.
+    """
+    template = Path(template_path) if template_path else DEFAULT_TEMPLATE
+    wb = load_workbook(template)
+    _build_sheet(wb, "Product", PRODUCT_COLUMNS)
+    _build_sheet(wb, "Component", COMPONENT_COLUMNS)
+    order = {name: i for i, name in enumerate(SHEET_ORDER)}
+    wb._sheets.sort(key=lambda ws: order.get(ws.title, len(order)))
+    _copy_input_data(wb, Path(input_path))
     wb.save(output_path)
