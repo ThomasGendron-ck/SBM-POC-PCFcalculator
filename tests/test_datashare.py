@@ -9,6 +9,7 @@ from pcf_extraction.datashare import (
     DQR_GUIDE_SHEET,
     PRODUCT_COLUMNS,
     SHEET_ORDER,
+    TAB_COLORS,
     apply_v093,
     block_of,
 )
@@ -117,6 +118,30 @@ def test_generate_from_synthetic(tmp_path):
     texts = [c.value for row in ug.iter_rows() for c in row if c.value]
     assert any("How to collect the data from suppliers" in str(t) for t in texts)
     assert any("Do you hold the PCF of [SKU]?" in str(t) for t in texts)
+
+
+def test_tab_order_and_colors(tmp_path):
+    in_path = _make_workbook(tmp_path)
+    out_path = tmp_path / "out.xlsx"
+    apply_v093(in_path, out_path, template_path=TEMPLATE)
+
+    wb = load_workbook(out_path)
+    assert wb.sheetnames == SHEET_ORDER
+    for name, color in TAB_COLORS.items():
+        ws = wb[name]
+        assert ws.sheet_properties.tabColor is not None
+        assert ws.sheet_properties.tabColor.rgb == color
+
+
+def test_dqr_guide_title_fill(tmp_path):
+    in_path = _make_workbook(tmp_path)
+    out_path = tmp_path / "out.xlsx"
+    apply_v093(in_path, out_path, template_path=TEMPLATE)
+
+    wb = load_workbook(out_path)
+    dqr = wb[DQR_GUIDE_SHEET]
+    for coord in ("A4", "D4", "A12", "D12"):
+        assert dqr[coord].fill.fgColor.rgb == "FF538DD5"
 
 
 def test_guides_format_preserved(tmp_path):

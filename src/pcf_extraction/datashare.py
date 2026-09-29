@@ -159,6 +159,13 @@ HEADER_RENAMES = {"Transformation Energy Type": "Transformation Energy Name"}
 
 DQR_GUIDE_SHEET = "DQR_Guide"
 SHEET_ORDER = ["UserGuide", "Product", "Component", DQR_GUIDE_SHEET]
+# Couleur des onglets (nom des onglets), alignée sur les blocs.
+TAB_COLORS: dict[str, str] = {
+    "UserGuide": "FF808080",
+    "Product": "FF13501B",
+    "Component": "FF75A67C",
+    DQR_GUIDE_SHEET: "FF538DD5",
+}
 
 
 def block_of(header: str, sheet: str = "Product") -> str:
@@ -380,5 +387,8 @@ def apply_v093(
     _build_sheet(wb, "Component", COMPONENT_COLUMNS)
     order = {name: i for i, name in enumerate(SHEET_ORDER)}
     wb._sheets.sort(key=lambda ws: order.get(ws.title, len(order)))
+    for ws in wb.worksheets:
+        if ws.title in TAB_COLORS:
+            ws.sheet_properties.tabColor = TAB_COLORS[ws.title]
     _copy_input_data(wb, Path(input_path))
     wb.save(output_path)
