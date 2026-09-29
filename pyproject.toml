@@ -20,6 +20,7 @@ dev = [
 [project.scripts]
 pcf-extract = "pcf_extraction.cli:main"
 pcf-collecte = "pcf_extraction.cli:main_collecte"
+pcf-datashare = "pcf_extraction.datashare_cli:main_datashare"
 
 [tool.setuptools.packages.find]
 where = ["src"]

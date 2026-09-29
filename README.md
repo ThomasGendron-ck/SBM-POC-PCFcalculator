@@ -1,5 +1,28 @@
 # PCF Extraction — Extraction et analyse des composants SBM
 
+## Mise à jour v0.92 du fichier de collecte LM (pcf-datashare)
+
+La commande `pcf-datashare` met à jour le fichier de collecte LM
+(« SBM - PCF - LM references - Data collection ») vers les spécifications v0.92 :
+
+```bash
+pcf-datashare \
+  --input "input/SBM - PCF - LM references - Data collection (v0.91).xlsx" \
+  --output "data/output/SBM - PCF - LM references - Data collection v0.92.xlsx"
+```
+
+- **Couleurs v0.92** (onglet « Fichier de collecte » de la spec) : Produit vert foncé
+  `13501B` (accent3 -0.25, police blanche), Composants `75A67C`, Description du composant
+  `A3C4A7`, PCF fournisseur `FBE3D6`, Impact fabrication fournisseur `F6C6AD`, Flag orange `FFC000` ;
+  les marqueurs GROUPING restent en gris avec titre vertical
+- **Onglet `DQR_Guide` dédié** : grille PACT TECH/GEO/TEMP (scores 1 à 5) et niveaux de
+  qualité de l'onglet `PACT_DQRSpec` de la spec (PACT Methodology 3.0, p. 66), au lieu
+  d'une section DQR dans le UserGuide
+- **UserGuide enrichi** : guide de collecte ligne par ligne (traduction en anglais de
+  l'onglet « Introduction » de la spec) — les 2 niveaux de qualité (Niveau 1 : PCF
+  fournisseur ; Niveau 2 : énergie/procédé), pour chaque question la case à remplir et le
+  responsable de collecte, puis les risques associés à l'estimation des données
+
 Outil d'extraction et d'analyse des composants pour calculer les facteurs d'émission (PCF — Product Carbon Footprint) à partir des fichiers Excel SBM (Bilan Carbone FY24-25).
 
 Le pipeline produit des rapports détaillés pour prioriser les recherches de données manquantes :
