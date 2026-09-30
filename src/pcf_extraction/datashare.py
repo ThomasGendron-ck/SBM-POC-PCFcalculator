@@ -299,7 +299,7 @@ def _header_style(cell, block: str) -> None:
 
 
 def _defaults(sheet: str, columns: list[tuple[str, str]], row: int) -> dict[str, object]:
-    pcf_unit = "kgCO2e/product" if sheet == "Product" else "kgCO2e/component"
+    pcf_unit = "kgCO2e"
     values: dict[str, object] = {
         "Net Weight Unit": "kg",
         "Gross Weight Unit": "kg",
@@ -482,7 +482,10 @@ def _copy_input_data(wb, input_path: Path) -> None:
                 continue
             src_r = row[0].row
             dst_r = src_r - src_data_start + DATA_START_ROW
+            default_headers = set(_defaults(sheet, columns, dst_r))
             for idx, (header, _) in enumerate(columns, start=1):
+                if header in default_headers:
+                    continue
                 old = HEADER_RENAMES.get(header, header)
                 col = src_headers.get(old)
                 if col is None:
