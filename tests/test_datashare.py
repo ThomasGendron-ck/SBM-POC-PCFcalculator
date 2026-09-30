@@ -1,4 +1,4 @@
-"""Tests de la génération du fichier de collecte LM v0.94 (datashare)."""
+"""Tests de la génération du fichier de collecte LM v0.95 (datashare)."""
 
 from pathlib import Path
 
@@ -82,7 +82,7 @@ def test_generate_from_synthetic(tmp_path):
     mandatory_row = [c.value for c in ws[1]]
     headers = [c.value for c in ws[2]]
     assert headers == [h for h, _ in PRODUCT_COLUMNS]
-    assert mandatory_row[headers.index("Product SKU")] == "Yes"
+    assert mandatory_row[headers.index("Product SKU")] == "Mandatory ->"
     assert mandatory_row[headers.index("Pack Unit Box")] is None
     assert mandatory_row[headers.index("Transformation GHG")] == "Automatic"
     by_header = {c.value: c for c in ws[2]}
@@ -94,7 +94,7 @@ def test_generate_from_synthetic(tmp_path):
     assert by_header["Data validation flag"].fill.fgColor.rgb == BLOCK_COLORS["Flag"]
     assert by_header["Product Details"].fill.fgColor.rgb == "FFD9D9D9"
     assert by_header["Supplier PCF"].fill.fgColor.rgb == "FFD9D9D9"
-    assert ws.freeze_panes == "C2"
+    assert ws.freeze_panes == "C3"
 
     grouped = {
         key
@@ -104,6 +104,13 @@ def test_generate_from_synthetic(tmp_path):
     first = headers.index("Category Code") + 1
     last = headers.index("Stock unit") + 1
     assert {get_column_letter(c) for c in range(first, last + 1)} <= grouped
+    supp_first = headers.index("Supplier PCF framework") + 1
+    supp_last = headers.index("Supplier PCF external review") + 1
+    assert {get_column_letter(c) for c in range(supp_first, supp_last + 1)} <= grouped
+    for header in ("Product Details", "Supplier PCF", "Transformation Details"):
+        col = headers.index(header) + 1
+        for r in (3, 202):
+            assert ws.cell(row=r, column=col).fill.fgColor.rgb == "FFD9D9D9"
 
     assert ws["A3"].value == "SORHOY15"
     assert ws["H3"].value == 1.25
@@ -214,7 +221,7 @@ def test_real_file_if_available(tmp_path):
 
 
 def test_prefill(tmp_path):
-    spec = Path(__file__).resolve().parents[1] / "input" / "Spec v0.93.xlsx"
+    spec = Path(__file__).resolve().parents[1] / "input" / "Spec v0.95.xlsx"
     material = (
         Path(__file__).resolve().parents[1]
         / "input"

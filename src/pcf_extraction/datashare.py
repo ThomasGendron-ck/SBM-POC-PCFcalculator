@@ -1,6 +1,6 @@
-"""Construction du fichier de collecte LM selon les spécifications v0.94.
+"""Construction du fichier de collecte LM selon les spécifications v0.95.
 
-Source : « POC Calculateur - Spécifications - v0.93.xlsx » (Spec_CollectionFile).
+Source : « POC Calculateur - Spécifications - v0.95.xlsx » (Spec_CollectionFile).
 - onglets Product (50 colonnes) et Component (53 colonnes) reconstruits selon la
   spec v0.93 : blocs Supplier PCF (framework/scope/declared unit ajoutés) et
   Transformation (declared unit, location, Energy Type/Consumption, Comment
@@ -111,7 +111,7 @@ FLAG_FIELDS = ["Data validation flag", "Data validation flag impact"]
 # Mandatory field (spec v0.94, Spec_CollectionFile colonne I) par onglet.
 MANDATORY: dict[str, dict[str, str]] = {
     "Product": {
-        "Product SKU": "Yes",
+        "Product SKU": "Mandatory ->",
         "Product Designation": "Yes",
         "Category Code": "Yes",
         "Category description": "Yes",
@@ -145,7 +145,7 @@ MANDATORY: dict[str, dict[str, str]] = {
         "Data validation flag impact": "Automatic",
     },
     "Component": {
-        "Component SKU": "Yes",
+        "Component SKU": "Mandatory ->",
         "Component Designation": "Yes",
         "Category Code": "Yes",
         "Category description": "Yes",
@@ -182,17 +182,17 @@ MANDATORY: dict[str, dict[str, str]] = {
 }
 
 
-# Groupings Plan (spec v0.94, Spec_CollectionFile) : (première, dernière) colonne
+# Groupings Plan (spec v0.95, Spec_CollectionFile) : (première, dernière) colonne
 # du groupe, bornes incluses, par onglet.
 GROUPING_RANGES: dict[str, list[tuple[str, str]]] = {
     "Product": [
         ("Category Code", "Stock unit"),
-        ("Supplier PDS", "Supplier PCF external review"),
+        ("Supplier PCF framework", "Supplier PCF external review"),
         ("Transformation Process declared unit", "Transformation DQR value"),
     ],
     "Component": [
         ("Category Code", "Stock unit"),
-        ("Supplier PDS", "Supplier PCF external review"),
+        ("Supplier PCF framework", "Supplier PCF external review"),
         ("Transformation Process declared unit", "Transformation DQR value"),
     ],
 }
@@ -406,7 +406,7 @@ def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]], data_end_row: i
         mcell = ws.cell(row=MANDATORY_ROW, column=idx, value=mandatory.get(header))
         mcell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         mcell.font = Font(italic=True, color="FF404040")
-        if mandatory.get(header) == "Yes":
+        if str(mandatory.get(header) or "").startswith(("Yes", "Mandatory")):
             mcell.font = Font(italic=True, bold=True, color="FFC00000")
         letter = get_column_letter(idx)
         if block == GROUPING:
@@ -443,6 +443,12 @@ def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]], data_end_row: i
         col = _column_of(columns, header)
         dv.add(f"{get_column_letter(col)}{DATA_START_ROW}:{get_column_letter(col)}{data_end_row}")
     ws.add_data_validation(dv)
+    grouping_fill = PatternFill("solid", fgColor=BLOCK_COLORS[GROUPING])
+    for idx, (header, block) in enumerate(columns, start=1):
+        if block != GROUPING:
+            continue
+        for row in range(DATA_START_ROW, data_end_row + 1):
+            ws.cell(row=row, column=idx).fill = grouping_fill
     for first, last in GROUPING_RANGES.get(sheet, []):
         first_col = _column_of(columns, first)
         last_col = _column_of(columns, last)
@@ -452,7 +458,7 @@ def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]], data_end_row: i
             dim.outlineLevel = 1
             dim.hidden = False
     ws.sheet_properties.outlinePr.summaryRight = False
-    ws.freeze_panes = "C2"
+    ws.freeze_panes = "C3"
     return ws
 
 
@@ -529,8 +535,16 @@ def apply_v093(
             DATA_START_ROW + len(product_rows) - 1,
             DATA_START_ROW + len(component_rows) - 1,
         )
-    _build_sheet(wb, "Product", PRODUCT_COLUMNS, data_end_row)
-    _build_sheet(wb, "Component", COMPONENT_COLUMNS, data_end_row)
+    product_end = (
+        DATA_START_ROW + len(product_rows) - 1 if product_rows is not None else data_end_row
+    )
+    component_end = (
+        DATA_START_ROW + len(component_rows) - 1
+        if component_rows is not None
+        else data_end_row
+    )
+    _build_sheet(wb, "Product", PRODUCT_COLUMNS, product_end)
+    _build_sheet(wb, "Component", COMPONENT_COLUMNS, component_end)
     order = {name: i for i, name in enumerate(SHEET_ORDER)}
     wb._sheets.sort(key=lambda ws: order.get(ws.title, len(order)))
     for ws in wb.worksheets:
