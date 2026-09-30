@@ -1,4 +1,4 @@
-"""Construction du fichier de collecte LM selon les spécifications v0.93.
+"""Construction du fichier de collecte LM selon les spécifications v0.94.
 
 Source : « POC Calculateur - Spécifications - v0.93.xlsx » (Spec_CollectionFile).
 - onglets Product (50 colonnes) et Component (53 colonnes) reconstruits selon la
@@ -23,23 +23,29 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-HEADER_ROW = 1
-DATA_START_ROW = 2
-DATA_END_ROW = 201
+HEADER_ROW = 2
+MANDATORY_ROW = 1
+DATA_START_ROW = 3
+DATA_END_ROW = 202
 DEFAULT_TEMPLATE = Path(__file__).resolve().parents[2] / "templates" / "Data_collection_template.xlsx"
 
 GROUPING = "GROUPING"
+CALCULATED_FIELDS = {"Transformation DQR value", "Transformation GHG"}
+CALCULATED_COLOR = "FFA6A6A6"
+
 BLOCK_COLORS: dict[str, str] = {
     "Produit": "FF13501B",
     "Composants": "FF75A67C",
     "Description du composant": "FFA3C4A7",
     "Supplier PCF": "FFFBE3D6",
     "Transformation": "FFF6C6AD",
+    "Calculé": CALCULATED_COLOR,
     "Flag": "FFFFC000",
     GROUPING: "FFD9D9D9",
 }
 BLOCK_FONT_COLORS: dict[str, str] = {
     "Produit": "FFFFFFFF",
+    "Calculé": "FF000000",
     "Composants": "FF000000",
     "Description du composant": "FF000000",
     "Supplier PCF": "FF000000",
@@ -101,6 +107,95 @@ TRANSFORMATION_FIELDS = [
     "Transformation GHG Unit",
 ]
 FLAG_FIELDS = ["Data validation flag", "Data validation flag impact"]
+
+# Mandatory field (spec v0.94, Spec_CollectionFile colonne I) par onglet.
+MANDATORY: dict[str, dict[str, str]] = {
+    "Product": {
+        "Product SKU": "Yes",
+        "Product Designation": "Yes",
+        "Category Code": "Yes",
+        "Category description": "Yes",
+        "Supplier Code": "Yes",
+        "Supplier Name": "Yes",
+        "Net Weight": "Yes",
+        "Net Weight Unit": "Yes",
+        "Gross Weight": "Yes",
+        "Gross Weight Unit": "Yes",
+        "Stock unit": "Yes",
+        "Supplier PCF framework": "Yes, if PCF section filled",
+        "Supplier PCF scope": "Yes, if PCF section filled",
+        "Supplier PCF declared unit": "Yes, if PCF section filled",
+        "Supplier PCF value": "Yes, if PCF section filled",
+        "Supplier PCF Unit": "Yes, if PCF section filled",
+        "Supplier PDS": "Yes, if PCF section filled",
+        "Supplier PCF date": "Yes, if PCF section filled",
+        "Supplier PCF source": "Yes, if PCF section filled",
+        "Supplier PCF external review": "Yes, if PCF section filled",
+        "Transformation Process declared unit": "Yes, if transformation section filled",
+        "Transformation Process location": "Yes, if transformation section filled",
+        "Transformation Energy Type": "Yes, if energy section filled",
+        "Transformation Energy Consumption": "Yes, if energy section filled",
+        "Transformation Energy Unit": "Yes, if energy section filled",
+        "Transformation Process Name": "Yes, if process section filled",
+        "Transformation Process Scrap Rate": "Yes, if process section filled",
+        "Transformation DQR value": "Automatic",
+        "Transformation GHG": "Automatic",
+        "Transformation GHG Unit": "Yes, if transformation section filled",
+        "Data validation flag": "Automatic",
+        "Data validation flag impact": "Automatic",
+    },
+    "Component": {
+        "Component SKU": "Yes",
+        "Component Designation": "Yes",
+        "Category Code": "Yes",
+        "Category description": "Yes",
+        "Carbon category": "Yes",
+        "Carbon sub category": "Yes",
+        "Supplier Code": "Yes",
+        "Supplier Name": "Yes",
+        "UVP description": "Yes",
+        "Net Weight": "Yes",
+        "Net Weight Unit": "Yes",
+        "Gross Weight": "Yes",
+        "Gross Weight Unit": "Yes",
+        "Stock unit": "Yes",
+        "Supplier PCF framework": "Yes, if PCF section filled",
+        "Supplier PCF value": "Yes, if PCF section filled",
+        "Supplier PCF Unit": "Yes, if PCF section filled",
+        "Supplier PDS": "Yes, if PCF section filled",
+        "Supplier PCF date": "Yes, if PCF section filled",
+        "Supplier PCF source": "Yes, if PCF section filled",
+        "Supplier PCF external review": "Yes, if PCF section filled",
+        "Transformation Process declared unit": "Yes, if transformation section filled",
+        "Transformation Process location": "Yes, if transformation section filled",
+        "Transformation Energy Type": "Yes, if energy section filled",
+        "Transformation Energy Consumption": "Yes, if energy section filled",
+        "Transformation Energy Unit": "Yes, if energy section filled",
+        "Transformation Process Name": "Yes, if process section filled",
+        "Transformation Process Scrap Rate": "Yes, if process section filled",
+        "Transformation DQR value": "Automatic",
+        "Transformation GHG": "Automatic",
+        "Transformation GHG Unit": "Yes, if transformation section filled",
+        "Data validation flag": "Automatic",
+        "Data validation flag impact": "Automatic",
+    },
+}
+
+
+# Groupings Plan (spec v0.94, Spec_CollectionFile) : (première, dernière) colonne
+# du groupe, bornes incluses, par onglet.
+GROUPING_RANGES: dict[str, list[tuple[str, str]]] = {
+    "Product": [
+        ("Category Code", "Stock unit"),
+        ("Supplier PDS", "Supplier PCF external review"),
+        ("Transformation Process declared unit", "Transformation DQR value"),
+    ],
+    "Component": [
+        ("Category Code", "Stock unit"),
+        ("Supplier PDS", "Supplier PCF external review"),
+        ("Transformation Process declared unit", "Transformation DQR value"),
+    ],
+}
 
 # Colonnes par onglet, dans l'ordre de la spec v0.93 (Spec_CollectionFile).
 PRODUCT_COLUMNS: list[tuple[str, str]] = (
@@ -302,9 +397,17 @@ def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]], data_end_row: i
     if sheet in wb.sheetnames:
         del wb[sheet]
     ws = wb.create_sheet(sheet)
+    mandatory = MANDATORY.get(sheet, {})
     for idx, (header, block) in enumerate(columns, start=1):
+        if header in CALCULATED_FIELDS:
+            block = "Calculé"
         cell = ws.cell(row=HEADER_ROW, column=idx, value=header)
         _header_style(cell, block)
+        mcell = ws.cell(row=MANDATORY_ROW, column=idx, value=mandatory.get(header))
+        mcell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        mcell.font = Font(italic=True, color="FF404040")
+        if mandatory.get(header) == "Yes":
+            mcell.font = Font(italic=True, bold=True, color="FFC00000")
         letter = get_column_letter(idx)
         if block == GROUPING:
             ws.column_dimensions[letter].width = 3.43
@@ -314,6 +417,7 @@ def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]], data_end_row: i
             ws.column_dimensions[letter].width = 15
         else:
             ws.column_dimensions[letter].width = 18
+    ws.row_dimensions[MANDATORY_ROW].height = 30
     ws.row_dimensions[HEADER_ROW].height = 60
     formats = _number_formats(columns)
     for row in range(DATA_START_ROW, data_end_row + 1):
@@ -332,15 +436,23 @@ def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]], data_end_row: i
     for header, formula in list_rules.items():
         dv = DataValidation(type="list", formula1=formula, allow_blank=True)
         col = _column_of(columns, header)
-        dv.add(f"{get_column_letter(col)}{DATA_START_ROW}:{get_column_letter(col)}{DATA_END_ROW}")
+        dv.add(f"{get_column_letter(col)}{DATA_START_ROW}:{get_column_letter(col)}{data_end_row}")
         ws.add_data_validation(dv)
     dv = DataValidation(type="list", formula1='"1,2,3,4,5"', allow_blank=True)
     for header in ("Transformation GEO DQR", "Transformation TECH DQR", "Transformation TEMP DQR"):
         col = _column_of(columns, header)
         dv.add(f"{get_column_letter(col)}{DATA_START_ROW}:{get_column_letter(col)}{data_end_row}")
     ws.add_data_validation(dv)
-    grouping_idx = _column_of(columns, "Product Details" if sheet == "Product" else "Component Details")
-    ws.freeze_panes = f"{get_column_letter(grouping_idx + 1)}{DATA_START_ROW}"
+    for first, last in GROUPING_RANGES.get(sheet, []):
+        first_col = _column_of(columns, first)
+        last_col = _column_of(columns, last)
+        for col in range(first_col, last_col + 1):
+            letter = get_column_letter(col)
+            dim = ws.column_dimensions[letter]
+            dim.outlineLevel = 1
+            dim.hidden = False
+    ws.sheet_properties.outlinePr.summaryRight = False
+    ws.freeze_panes = "C2"
     return ws
 
 
@@ -353,21 +465,25 @@ def _copy_input_data(wb, input_path: Path) -> None:
         src_ws, dst_ws = src[sheet], wb[sheet]
         src_headers = {
             (c.value or "").strip(): c.column
-            for c in src_ws[HEADER_ROW]
+            for c in src_ws[1]
             if c.value is not None
         }
-        for row in src_ws.iter_rows(min_row=DATA_START_ROW, max_row=DATA_END_ROW):
+        src_data_start = 2
+        for row in src_ws.iter_rows(min_row=src_data_start, max_row=src_ws.max_row):
+            if row[0].row - src_data_start + DATA_START_ROW > DATA_END_ROW:
+                break
             if not any(c.value is not None for c in row):
                 continue
-            r = row[0].row
+            src_r = row[0].row
+            dst_r = src_r - src_data_start + DATA_START_ROW
             for idx, (header, _) in enumerate(columns, start=1):
                 old = HEADER_RENAMES.get(header, header)
                 col = src_headers.get(old)
                 if col is None:
                     continue
-                value = src_ws.cell(row=r, column=col).value
+                value = src_ws.cell(row=src_r, column=col).value
                 if value is not None and not str(value).startswith("="):
-                    dst_ws.cell(row=r, column=idx, value=value)
+                    dst_ws.cell(row=dst_r, column=idx, value=value)
 
 
 def _write_rows(ws, columns: list[tuple[str, str]], rows: list[dict]) -> None:
@@ -410,7 +526,6 @@ def apply_v093(
 
         product_rows, component_rows = build_prefill_rows(Path(spec_path), Path(material_path))
         data_end_row = max(
-            DATA_END_ROW,
             DATA_START_ROW + len(product_rows) - 1,
             DATA_START_ROW + len(component_rows) - 1,
         )

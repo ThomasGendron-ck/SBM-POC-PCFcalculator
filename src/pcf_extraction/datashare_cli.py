@@ -1,4 +1,4 @@
-"""Ligne de commande : pcf-datashare (fichier de collecte LM, spec v0.93)."""
+"""Ligne de commande : pcf-datashare (fichier de collecte LM, spec v0.94)."""
 
 import argparse
 import sys
@@ -32,7 +32,7 @@ def main_datashare(argv=None) -> int:
     parser.add_argument(
         "--spec",
         default=None,
-        help="Spécifications v0.93 (.xlsx) : pré-remplissage des produits LM",
+        help="Spécifications v0.94 (.xlsx) : pré-remplissage des produits LM",
     )
     parser.add_argument(
         "--material",
@@ -46,7 +46,7 @@ def main_datashare(argv=None) -> int:
         return 1
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    print(f"Génération selon la spec v0.93 : {args.input} -> {output}")
+    print(f"Génération selon la spec v0.94 : {args.input} -> {output}")
     counts = apply_v093(
         args.input,
         output,

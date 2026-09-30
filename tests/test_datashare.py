@@ -1,12 +1,14 @@
-"""Tests de la génération du fichier de collecte LM v0.93 (datashare)."""
+"""Tests de la génération du fichier de collecte LM v0.94 (datashare)."""
 
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 from pcf_extraction.datashare import (
     BLOCK_COLORS,
     DQR_GUIDE_SHEET,
+    MANDATORY,
     PRODUCT_COLUMNS,
     SHEET_ORDER,
     TAB_COLORS,
@@ -77,25 +79,41 @@ def test_generate_from_synthetic(tmp_path):
     assert wb.sheetnames == SHEET_ORDER
 
     ws = wb["Product"]
-    headers = [c.value for c in ws[1]]
+    mandatory_row = [c.value for c in ws[1]]
+    headers = [c.value for c in ws[2]]
     assert headers == [h for h, _ in PRODUCT_COLUMNS]
-    by_header = {c.value: c for c in ws[1]}
+    assert mandatory_row[headers.index("Product SKU")] == "Yes"
+    assert mandatory_row[headers.index("Pack Unit Box")] is None
+    assert mandatory_row[headers.index("Transformation GHG")] == "Automatic"
+    by_header = {c.value: c for c in ws[2]}
     assert by_header["Product SKU"].fill.fgColor.rgb == BLOCK_COLORS["Produit"]
     assert by_header["Supplier PCF value"].fill.fgColor.rgb == BLOCK_COLORS["Supplier PCF"]
     assert by_header["Transformation Process Name"].fill.fgColor.rgb == BLOCK_COLORS["Transformation"]
+    assert by_header["Transformation DQR value"].fill.fgColor.rgb == "FFA6A6A6"
+    assert by_header["Transformation GHG"].fill.fgColor.rgb == "FFA6A6A6"
     assert by_header["Data validation flag"].fill.fgColor.rgb == BLOCK_COLORS["Flag"]
     assert by_header["Product Details"].fill.fgColor.rgb == "FFD9D9D9"
     assert by_header["Supplier PCF"].fill.fgColor.rgb == "FFD9D9D9"
+    assert ws.freeze_panes == "C2"
 
-    assert ws["A2"].value == "SORHOY15"
-    assert ws["H2"].value == 1.25
+    grouped = {
+        key
+        for key, dim in ws.column_dimensions.items()
+        if dim.outlineLevel == 1
+    }
+    first = headers.index("Category Code") + 1
+    last = headers.index("Stock unit") + 1
+    assert {get_column_letter(c) for c in range(first, last + 1)} <= grouped
+
+    assert ws["A3"].value == "SORHOY15"
+    assert ws["H3"].value == 1.25
     energy_col = headers.index("Transformation Energy Type") + 1
-    assert ws.cell(row=2, column=energy_col).value == "electricity"
+    assert ws.cell(row=3, column=energy_col).value == "electricity"
     scrap_col = headers.index("Transformation Process Scrap Rate") + 1
-    assert ws.cell(row=2, column=scrap_col).value == 0.03
+    assert ws.cell(row=3, column=scrap_col).value == 0.03
 
     def data_cell(header: str):
-        return ws.cell(row=2, column=headers.index(header) + 1)
+        return ws.cell(row=3, column=headers.index(header) + 1)
 
     assert str(data_cell("Transformation DQR value").value).startswith("=IF(COUNT(")
     assert str(data_cell("Transformation GHG").value).startswith("=IF(")
@@ -180,18 +198,18 @@ def test_real_file_if_available(tmp_path):
     wb = load_workbook(out_path)
     assert wb.sheetnames == SHEET_ORDER
     comp = wb["Component"]
-    by_header = {c.value: c for c in comp[1]}
+    by_header = {c.value: c for c in comp[2]}
     assert by_header["Component SKU"].fill.fgColor.rgb == BLOCK_COLORS["Composants"]
     assert by_header["Net Weight"].fill.fgColor.rgb == BLOCK_COLORS["Description du composant"]
     assert by_header["Supplier PDS"].fill.fgColor.rgb == BLOCK_COLORS["Supplier PCF"]
     assert by_header["Transformation Process Name"].fill.fgColor.rgb == BLOCK_COLORS["Transformation"]
     assert by_header["Component Details"].fill.fgColor.rgb == "FFD9D9D9"
     prod = wb["Product"]
-    by_header_p = {c.value: c for c in prod[1]}
+    by_header_p = {c.value: c for c in prod[2]}
     assert by_header_p["Product SKU"].fill.fgColor.rgb == BLOCK_COLORS["Produit"]
     assert by_header_p["Product SKU"].font.color.rgb == "FFFFFFFF"
     comp2 = wb["Component"]
-    by_header_c = {c.value: c for c in comp2[1]}
+    by_header_c = {c.value: c for c in comp2[2]}
     assert by_header_c["UVP description"].fill.fgColor.rgb == BLOCK_COLORS["Description du composant"]
 
 
@@ -220,19 +238,22 @@ def test_prefill(tmp_path):
 
     wb = load_workbook(out_path)
     prod = wb["Product"]
-    headers = [c.value for c in prod[1]]
+    headers = [c.value for c in prod[2]]
     sku_col = headers.index("Product SKU") + 1
-    skus = [prod.cell(row=r, column=sku_col).value for r in range(2, 2 + n_products)]
+    skus = [prod.cell(row=r, column=sku_col).value for r in range(3, 3 + n_products)]
     assert skus[0] is not None and all(s for s in skus)
     assert "SORHOY15" in skus
     comp = wb["Component"]
-    headers_c = [c.value for c in comp[1]]
+    headers_c = [c.value for c in comp[2]]
     csku_col = headers_c.index("Component SKU") + 1
-    cskus = [comp.cell(row=r, column=csku_col).value for r in range(2, 2 + n_components)]
+    cskus = [comp.cell(row=r, column=csku_col).value for r in range(3, 3 + n_components)]
     assert cskus[0] is not None
     assert len(set(cskus)) == n_components
+    # aucune ligne pré-remplie au-delà des données réelles
+    assert prod.cell(row=3 + n_products, column=sku_col).value is None
+    assert comp.cell(row=3 + n_components, column=csku_col).value is None
     # les formules par défaut restent en place sur les lignes pré-remplies
     dqr_col = headers.index("Transformation DQR value") + 1
-    assert str(prod.cell(row=2, column=dqr_col).value).startswith("=IF(COUNT(")
+    assert str(prod.cell(row=3, column=dqr_col).value).startswith("=IF(COUNT(")
     flag_col = headers.index("Data validation flag") + 1
-    assert str(prod.cell(row=2, column=flag_col).value).startswith("=IF(AND(")
+    assert str(prod.cell(row=3, column=flag_col).value).startswith("=IF(AND(")
