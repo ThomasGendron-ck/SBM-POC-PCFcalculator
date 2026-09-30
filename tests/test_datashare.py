@@ -73,7 +73,7 @@ def test_columns_match_spec_v093():
 def test_generate_from_synthetic(tmp_path):
     in_path = _make_workbook(tmp_path)
     out_path = tmp_path / "out.xlsx"
-    apply_v093(in_path, out_path, template_path=TEMPLATE)
+    apply_v093(out_path, input_path=in_path, template_path=TEMPLATE)
 
     wb = load_workbook(out_path)
     assert wb.sheetnames == SHEET_ORDER
@@ -148,7 +148,7 @@ def test_generate_from_synthetic(tmp_path):
 def test_tab_order_and_colors(tmp_path):
     in_path = _make_workbook(tmp_path)
     out_path = tmp_path / "out.xlsx"
-    apply_v093(in_path, out_path, template_path=TEMPLATE)
+    apply_v093(out_path, input_path=in_path, template_path=TEMPLATE)
 
     wb = load_workbook(out_path)
     assert wb.sheetnames == SHEET_ORDER
@@ -161,7 +161,7 @@ def test_tab_order_and_colors(tmp_path):
 def test_dqr_guide_title_fill(tmp_path):
     in_path = _make_workbook(tmp_path)
     out_path = tmp_path / "out.xlsx"
-    apply_v093(in_path, out_path, template_path=TEMPLATE)
+    apply_v093(out_path, input_path=in_path, template_path=TEMPLATE)
 
     wb = load_workbook(out_path)
     dqr = wb[DQR_GUIDE_SHEET]
@@ -172,7 +172,7 @@ def test_dqr_guide_title_fill(tmp_path):
 def test_guides_format_preserved(tmp_path):
     in_path = _make_workbook(tmp_path)
     out_path = tmp_path / "out.xlsx"
-    apply_v093(in_path, out_path, template_path=TEMPLATE)
+    apply_v093(out_path, input_path=in_path, template_path=TEMPLATE)
 
     wb = load_workbook(out_path)
     ref = load_workbook(TEMPLATE)
@@ -201,7 +201,7 @@ def test_real_file_if_available(tmp_path):
     if not INPUT.is_file():
         return
     out_path = tmp_path / "out.xlsx"
-    apply_v093(INPUT, out_path, template_path=TEMPLATE)
+    apply_v093(out_path, input_path=INPUT, template_path=TEMPLATE)
     wb = load_workbook(out_path)
     assert wb.sheetnames == SHEET_ORDER
     comp = wb["Component"]
@@ -232,8 +232,8 @@ def test_prefill(tmp_path):
     in_path = _make_workbook(tmp_path)
     out_path = tmp_path / "out_prefilled.xlsx"
     counts = apply_v093(
-        in_path,
         out_path,
+        input_path=in_path,
         template_path=TEMPLATE,
         spec_path=spec,
         material_path=material,
@@ -264,3 +264,42 @@ def test_prefill(tmp_path):
     assert str(prod.cell(row=3, column=dqr_col).value).startswith("=IF(COUNT(")
     flag_col = headers.index("Data validation flag") + 1
     assert str(prod.cell(row=3, column=flag_col).value).startswith("=IF(AND(")
+
+def test_full_regeneration_from_sources(tmp_path):
+    spec = Path(__file__).resolve().parents[1] / "input" / "Spec v0.95.xlsx"
+    material = (
+        Path(__file__).resolve().parents[1]
+        / "input"
+        / "MaterialPackaging_ExtractPourPCF.xlsx"
+    )
+    if not spec.is_file() or not material.is_file():
+        return
+    out_path = tmp_path / "out_full.xlsx"
+    counts = apply_v093(
+        out_path,
+        input_path=None,
+        template_path=TEMPLATE,
+        spec_path=spec,
+        material_path=material,
+    )
+    assert counts == (217, 962)
+    wb = load_workbook(out_path)
+    prod = wb["Product"]
+    headers = [c.value for c in prod[2]]
+    sku_col = headers.index("Product SKU") + 1
+    skus = [prod.cell(row=r, column=sku_col).value for r in range(3, 3 + counts[0])]
+    assert all(skus) and "SORHOY15" in skus
+    # aucune ligne au-delà des données source
+    assert prod.cell(row=3 + counts[0], column=sku_col).value is None
+    # default values de la spec non écrasées (aucun ancien fichier lu)
+    assert prod.cell(3, headers.index("Supplier PCF Unit") + 1).value == "kgCO2e"
+
+
+def test_quick_regeneration_mode(tmp_path):
+    in_path = _make_workbook(tmp_path)
+    out_path = tmp_path / "out_quick.xlsx"
+    apply_v093(out_path, input_path=in_path, template_path=TEMPLATE)
+    wb = load_workbook(out_path)
+    ws = wb["Product"]
+    assert ws["A3"].value == "SORHOY15"
+    assert ws.freeze_panes == "C3"

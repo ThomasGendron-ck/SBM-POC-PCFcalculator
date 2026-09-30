@@ -462,8 +462,14 @@ def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]], data_end_row: i
     return ws
 
 
-def _copy_input_data(wb, input_path: Path) -> None:
-    """Recopie les données saisies du fichier d'entrée vers le nouveau layout."""
+def _copy_input_data(wb, input_path: Path, overwrite: bool = True) -> None:
+    """Recopie les données saisies du fichier d'entrée vers le nouveau layout.
+
+    overwrite=True : les données de l'ancien fichier écrasent les cellules
+    pré-remplies (mode régénération rapide seule). overwrite=False : seules
+    les cellules encore vides sont complétées (les données source passent
+    en priorité).
+    """
     src = load_workbook(input_path, data_only=False)
     for sheet, columns in (("Product", PRODUCT_COLUMNS), ("Component", COMPONENT_COLUMNS)):
         if sheet not in src.sheetnames or sheet not in wb.sheetnames:
@@ -491,8 +497,14 @@ def _copy_input_data(wb, input_path: Path) -> None:
                 if col is None:
                     continue
                 value = src_ws.cell(row=src_r, column=col).value
-                if value is not None and not str(value).startswith("="):
-                    dst_ws.cell(row=dst_r, column=idx, value=value)
+                if value is None or str(value).startswith("="):
+                    continue
+                if not overwrite and dst_ws.cell(row=dst_r, column=idx).value not in (
+                    None,
+                    "",
+                ):
+                    continue
+                dst_ws.cell(row=dst_r, column=idx, value=value)
 
 
 def _write_rows(ws, columns: list[tuple[str, str]], rows: list[dict]) -> None:
@@ -509,22 +521,33 @@ def _write_rows(ws, columns: list[tuple[str, str]], rows: list[dict]) -> None:
 
 
 def apply_v093(
-    input_path: str | Path,
     output_path: str | Path,
+    input_path: str | Path | None = None,
     template_path: str | Path | None = None,
     spec_path: str | Path | None = None,
     material_path: str | Path | None = None,
 ) -> tuple[int, int] | None:
-    """Génère le fichier de collecte v0.93 depuis un fichier v0.9x.
+    """Génère le fichier de collecte selon la spec v0.95.
+
+    Deux modes :
+
+    - **Régénération complète** (input_path=None + spec_path/material_path) :
+      tout vient des données source — références LM (onglet « Produits LM » de
+      la spec ou onglet « Export » d'un fichier Référencement LM) et Masterbase
+      du fichier « Material and Packaging - ExtractPourPCF ». Aucun ancien
+      fichier de collecte n'est lu.
+
+    - **Régénération rapide** (input_path fourni) : le layout et les données
+      saisies de l'ancien fichier de collecte sont repris (utile pour les
+      évolutions de format ou de contenu hors données sources) ; si
+      spec_path/material_path sont aussi fournis, les données source
+      pré-remplissent d'abord les onglets puis les données de l'ancien fichier
+      complètent les champs non couverts par les sources.
 
     Le template (guides UserGuide/DQR_Guide formatés par SBM, ordre des onglets)
     sert de base ; les onglets Product et Component sont reconstruits selon la
-    spec v0.93 puis les données du fichier d'entrée y sont recopiées.
-
-    Si spec_path et material_path sont fournis (spécifications v0.93 + fichier
-    « Material and Packaging - ExtractPourPCF »), les onglets Product et
-    Component sont pré-remplis avec les références LM et leurs composants.
-    Retourne alors (nombre de produits, nombre de composants) pré-remplis.
+    spec puis pré-remplis. Retourne (nombre de produits, nombre de composants)
+    pré-remplis lorsque les sources sont fournies.
     """
     template = Path(template_path) if template_path else DEFAULT_TEMPLATE
     wb = load_workbook(template)
@@ -553,11 +576,12 @@ def apply_v093(
     for ws in wb.worksheets:
         if ws.title in TAB_COLORS:
             ws.sheet_properties.tabColor = TAB_COLORS[ws.title]
-    _copy_input_data(wb, Path(input_path))
     counts = None
     if product_rows is not None:
         _write_rows(wb["Product"], PRODUCT_COLUMNS, product_rows)
         _write_rows(wb["Component"], COMPONENT_COLUMNS, component_rows)
         counts = (len(product_rows), len(component_rows))
+    if input_path is not None:
+        _copy_input_data(wb, Path(input_path), overwrite=counts is None)
     wb.save(output_path)
     return counts

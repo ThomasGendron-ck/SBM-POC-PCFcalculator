@@ -40,10 +40,30 @@ def _num(value) -> float | None:
     return float(number)
 
 
-def load_lm_products(spec_path: str | Path) -> pd.DataFrame:
-    """Liste des références LM depuis l'onglet « Produits LM » de la spec."""
-    df = pd.read_excel(spec_path, sheet_name=LM_SPEC_SHEET)
-    df = df.rename(columns={LM_SKU_COL: "SKU", LM_DESIGNATION_COL: "Designation"})
+LM_EXPORT_SHEET = "Export"
+LM_EXPORT_SKU_COL = "Num Reference fournisseur"
+LM_EXPORT_DESIGNATION_COL = "Designation article"
+
+
+def load_lm_products(source_path: str | Path) -> pd.DataFrame:
+    """Liste des références LM depuis la spec (onglet « Produits LM ») ou
+    directement depuis le fichier « Référencement LM » (onglet « Export »)."""
+    source_path = Path(source_path)
+    sheets = pd.ExcelFile(source_path).sheet_names
+    if LM_SPEC_SHEET in sheets:
+        df = pd.read_excel(source_path, sheet_name=LM_SPEC_SHEET)
+        df = df.rename(columns={LM_SKU_COL: "SKU", LM_DESIGNATION_COL: "Designation"})
+    elif LM_EXPORT_SHEET in sheets:
+        df = pd.read_excel(source_path, sheet_name=LM_EXPORT_SHEET)
+        df.columns = [str(c).strip() for c in df.columns]
+        df = df.rename(
+            columns={LM_EXPORT_SKU_COL: "SKU", LM_EXPORT_DESIGNATION_COL: "Designation"}
+        )
+    else:
+        raise ValueError(
+            f"{source_path} : ni l'onglet « {LM_SPEC_SHEET} » (spec) ni "
+            f"« {LM_EXPORT_SHEET} » (Référencement LM) n'a été trouvé."
+        )
     df["SKU"] = df["SKU"].map(_text)
     df = df.dropna(subset=["SKU"]).drop_duplicates(subset="SKU")
     return df[["SKU", "Designation"]]
