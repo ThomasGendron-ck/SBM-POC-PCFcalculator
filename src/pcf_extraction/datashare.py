@@ -546,6 +546,7 @@ def apply_v093(
     template_path: str | Path | None = None,
     spec_path: str | Path | None = None,
     material_path: str | Path | None = None,
+    mb_product_path: str | Path | None = None,
 ) -> tuple[int, int] | None:
     """Génère le fichier de collecte selon la spec v0.95.
 
@@ -576,7 +577,9 @@ def apply_v093(
     if spec_path and material_path:
         from .prefill import build_prefill_rows
 
-        product_rows, component_rows = build_prefill_rows(Path(spec_path), Path(material_path))
+        product_rows, component_rows = build_prefill_rows(
+            Path(spec_path), Path(material_path), mb_product_path=mb_product_path
+        )
         data_end_row = max(
             DATA_START_ROW + len(product_rows) - 1,
             DATA_START_ROW + len(component_rows) - 1,

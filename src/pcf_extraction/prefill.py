@@ -40,6 +40,47 @@ def _num(value) -> float | None:
     return float(number)
 
 
+MB_PRODUCT_SHEET = "MASTERBASE Products"
+MB_EXTRACT_SHEET = "MasterBase_Products"
+
+
+def _sku_key(sku: str) -> str:
+    """Clé de lookup SKU : les zéros de tête ne sont pas significatifs
+    (la BOM référence « 000001 » alors que certains extraits stockent « 1 »)."""
+    return sku.lstrip("0") or sku
+
+
+def _load_products_frame(path: Path) -> pd.DataFrame:
+    """Charge les produits Masterbase depuis un extrait complet
+    (« MASTERBASE Products », en-tête sur la ligne 3) ou depuis le fichier
+    « ExtractPourPCF » (« MasterBase_Products », en-tête ligne 12)."""
+    sheets = pd.ExcelFile(path).sheet_names
+    sheet = next(
+        (name for name in sheets if name.strip().lower() == MB_PRODUCT_SHEET.lower()),
+        None,
+    )
+    if sheet is None:
+        sheet = next(
+            (name for name in sheets if name.strip().lower() == MB_EXTRACT_SHEET.lower()),
+            None,
+        )
+    if sheet is None:
+        raise ValueError(
+            f"{path} : aucun onglet produits Masterbase trouvé "
+            f"(« {MB_PRODUCT_SHEET} » ou « {MB_EXTRACT_SHEET} »)."
+        )
+    preview = pd.read_excel(path, sheet_name=sheet, header=None, nrows=15)
+    header_row = next(
+        i for i in range(len(preview)) if _text(preview.iloc[i, 0]) == "SKU"
+    )
+    products = pd.read_excel(path, sheet_name=sheet, header=header_row, dtype=str)
+    products["SKU"] = products["SKU"].map(_text)
+    products = products.dropna(subset=["SKU"]).drop_duplicates(subset="SKU")
+    products.index = products["SKU"].map(_sku_key)
+    products = products[~products.index.duplicated(keep="first")]
+    return products
+
+
 LM_EXPORT_SHEET = "Export"
 LM_EXPORT_SKU_COL = "Num Reference fournisseur"
 LM_EXPORT_DESIGNATION_COL = "Designation article"
@@ -69,13 +110,13 @@ def load_lm_products(source_path: str | Path) -> pd.DataFrame:
     return df[["SKU", "Designation"]]
 
 
-def _load_masterbase(material_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    products = pd.read_excel(material_path, sheet_name="MasterBase_Products", header=11)
+def _load_masterbase(
+    material_path: Path, mb_product_path: Path | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    products = _load_products_frame(Path(mb_product_path) if mb_product_path else material_path)
     bom = pd.read_excel(material_path, sheet_name="MasterBase_BOM", header=11)
     purchases = pd.read_excel(material_path, sheet_name="CK_MaterialPurchase", header=11)
     categories = pd.read_excel(material_path, sheet_name="Category_Param")
-    products["SKU"] = products["SKU"].map(_text)
-    products = products.dropna(subset=["SKU"]).drop_duplicates(subset="SKU").set_index("SKU", drop=False)
     bom = bom.dropna(subset=["ITMREF", "CPNITMREF"])
     for col in ("ITMREF", "CPNITMREF"):
         bom[col] = bom[col].map(_text)
@@ -90,14 +131,19 @@ def _load_masterbase(material_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, p
 def build_prefill_rows(
     spec_path: str | Path,
     material_path: str | Path,
+    mb_product_path: str | Path | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Construit les lignes Product et Component à pré-remplir.
 
     Retourne (product_rows, component_rows) : une ligne par référence LM et une
-    ligne par composant unique du périmètre BOM élargi.
+    ligne par composant unique du périmètre BOM élargi. Les attributs produits
+    proviennent de la Masterbase complète (mb_product_path) si fournie, sinon de
+    l'extrait ExtractPourPCF.
     """
     lm = load_lm_products(spec_path)
-    products, bom, purchases, categories = _load_masterbase(Path(material_path))
+    products, bom, purchases, categories = _load_masterbase(
+        Path(material_path), Path(mb_product_path) if mb_product_path else None
+    )
     category_names = dict(zip(categories["Category_Code"], categories["Category_Name"]))
 
     bom_active = bom[
@@ -105,52 +151,48 @@ def build_prefill_rows(
     ]
     bom_active = bom_active.drop_duplicates(subset=["ITMREF", "CPNITMREF"], keep="first")
 
-    purchase_suppliers = (
-        purchases.dropna(subset=["SUPPLIER_CODE"])
-        .sort_values("SUPPLIER_CODE")
-        .drop_duplicates(subset=["PRODUCT"], keep="first")
-        .set_index("PRODUCT", drop=False)
-    )
-
-    raw_materials = (
-        purchases.dropna(subset=["RawMat_SubFamily"])
+    raw_material_cf = (
+        purchases.dropna(subset=["RawMat_Hypothesis"])
         .sort_values("Weight_KGTotal", ascending=False)
         .drop_duplicates(subset=["PRODUCT"], keep="first")
         .set_index("PRODUCT", drop=False)
     )
 
+    def _product_row(sku: str):
+        key = _sku_key(sku)
+        return products.loc[key] if key in products.index else None
+
     def supplier_of(sku: str) -> tuple[str | None, str | None]:
-        """Supplier Code/Name : MB_Product (BPSNUM/BPSNAM) selon la spec,
-        fallback CK_MaterialPurchase (SUPPLIER_CODE/SUPPLIER_NAME)."""
-        if sku in products.index:
-            row = products.loc[sku]
-            code = _text(row["BPSNUM"]) if "BPSNUM" in products.columns else None
-            name = _text(row["BPSNAM"]) if "BPSNAM" in products.columns else None
-            if code or name:
-                return code, name
-        if sku in purchase_suppliers.index:
-            row = purchase_suppliers.loc[sku]
-            return _text(row["SUPPLIER_CODE"]), _text(row["SUPPLIER_NAME"])
-        return None, None
+        """Supplier Code/Name : MB_Product (BPSNUM/BPSNAM) uniquement (spec v0.96)."""
+        row = _product_row(sku)
+        if row is None:
+            return None, None
+        code = _text(row["BPSNUM"]) if "BPSNUM" in products.columns else None
+        name = _text(row["BPSNAM"]) if "BPSNAM" in products.columns else None
+        return code, name
 
     def raw_material_of(sku: str) -> str | None:
-        """Matière première : MB_Product (ZCODMAT2) selon la spec,
-        fallback CK_MaterialPurchase (RawMat_SubFamily)."""
-        if sku in products.index:
-            row = products.loc[sku]
-            if "ZCODMAT2" in products.columns:
-                material = _text(row["ZCODMAT2"])
-                if material:
-                    return material
-        if sku in raw_materials.index:
-            return _text(raw_materials.loc[sku]["RawMat_SubFamily"])
+        """Matière première : MB_Product (ZCODMAT2) uniquement (spec v0.96)."""
+        row = _product_row(sku)
+        if row is None or "ZCODMAT2" not in products.columns:
+            return None
+        return _text(row["ZCODMAT2"])
+
+    def raw_material_cf_of(sku: str) -> str | None:
+        """Raw Material - Carbon Footprint : CK_MaterialPurchase
+        (RawMat_Hypothesis), ligne de plus gros poids (spec v0.96)."""
+        if sku in raw_material_cf.index:
+            return _text(raw_material_cf.loc[sku]["RawMat_Hypothesis"])
+        key = _sku_key(sku)
+        if key != sku and key in raw_material_cf.index:
+            return _text(raw_material_cf.loc[key]["RawMat_Hypothesis"])
         return None
 
 
     product_rows: list[dict] = []
     for _, lmr in lm.iterrows():
         sku = lmr["SKU"]
-        prod = products.loc[sku] if sku in products.index else None
+        prod = _product_row(sku)
 
         def attr(column: str):
             if prod is None:
@@ -180,7 +222,7 @@ def build_prefill_rows(
     component_refs = sorted(set(bom_active[bom_active["ITMREF"].isin(lm_skus)]["CPNITMREF"]))
     component_rows: list[dict] = []
     for sku in component_refs:
-        prod = products.loc[sku] if sku in products.index else None
+        prod = _product_row(sku)
 
         def attr(column: str):
             if prod is None:
@@ -205,6 +247,7 @@ def build_prefill_rows(
                 "Gross Weight Unit": attr("Weight unit"),
                 "Stock unit": attr("PCU0"),
                 "Raw Material (MB Product)": raw_material,
+                "Raw Material - Carbon Footprint": raw_material_cf_of(sku),
                 "UVP description": attr("ZUVP_DES"),
             }
         )

@@ -267,6 +267,11 @@ def test_prefill(tmp_path):
     flag_col = headers.index("Data validation flag") + 1
     assert str(prod.cell(row=3, column=flag_col).value).startswith("=IF(AND(")
 
+MB_PRODUCT = (
+    Path(__file__).resolve().parents[1] / "input" / "Masterbase_Product_2026 07 23.xlsx"
+)
+
+
 def test_full_regeneration_from_sources(tmp_path):
     spec = Path(__file__).resolve().parents[1] / "input" / "Spec v0.95.xlsx"
     material = (
@@ -283,8 +288,33 @@ def test_full_regeneration_from_sources(tmp_path):
         template_path=TEMPLATE,
         spec_path=spec,
         material_path=material,
+        mb_product_path=MB_PRODUCT if MB_PRODUCT.is_file() else None,
     )
     assert counts == (217, 962)
+    if MB_PRODUCT.is_file():
+        comp = wb_comp = load_workbook(out_path)["Component"]
+        headers_c = [c.value for c in comp[2]]
+        csku = headers_c.index("Component SKU") + 1
+        supp = headers_c.index("Supplier Code") + 1
+        rmcf = headers_c.index("Raw Material - Carbon Footprint") + 1
+        rows = {
+            comp.cell(row=r, column=csku).value: r for r in range(3, 3 + counts[1])
+        }
+        # spec v0.96 : supplier depuis MB_Product uniquement, SKU a zéros de tête
+        assert comp.cell(row=rows["103539"], column=supp).value == "EAD05475"
+        assert comp.cell(row=rows["000001"], column=supp).value == "GFR00004"
+        assert comp.cell(row=rows["000009"], column=supp).value == "GFR00004"
+        assert comp.cell(row=rows["150028"], column=supp).value == "EUS19262"
+        # pas de fallback CK sur Supplier Code : au moins un SKU CK sans BPSNUM vide
+        assert any(
+            comp.cell(row=r, column=supp).value is None
+            for r in range(3, 3 + counts[1])
+        )
+        # Raw Material - Carbon Footprint pré-rempli depuis CK RawMat_Hypothesis
+        assert any(
+            comp.cell(row=r, column=rmcf).value
+            for r in range(3, 3 + counts[1])
+        )
     wb = load_workbook(out_path)
     prod = wb["Product"]
     headers = [c.value for c in prod[2]]

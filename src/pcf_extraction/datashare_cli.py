@@ -58,8 +58,15 @@ def main_datashare(argv=None) -> int:
         "--material",
         default=None,
         help="Fichier « Material and Packaging - ExtractPourPCF » (.xlsx) : "
-        "Masterbase (MB Product, MB BOM, fournisseurs, catégories) pour le "
+        "Masterbase (MB BOM, CK_MaterialPurchase, catégories) pour le "
         "pré-remplissage des produits et composants",
+    )
+    parser.add_argument(
+        "--mb-product",
+        default=None,
+        help="Extrait Masterbase produits complet (.xlsx, onglet « MASTERBASE "
+        "Products » : BPSNUM/BPSNAM, ZCODMAT2) : source des attributs "
+        "produits/composants selon la spec v0.96",
     )
     args = parser.parse_args(argv)
 
@@ -104,6 +111,7 @@ def main_datashare(argv=None) -> int:
         template_path=args.template,
         spec_path=spec_source,
         material_path=args.material,
+        mb_product_path=args.mb_product,
     )
     if counts is not None:
         print(f"Pré-remplissage : {counts[0]} produits, {counts[1]} composants.")
