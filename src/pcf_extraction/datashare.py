@@ -459,7 +459,27 @@ def _build_sheet(wb, sheet: str, columns: list[tuple[str, str]], data_end_row: i
             dim.hidden = False
     ws.sheet_properties.outlinePr.summaryRight = False
     ws.freeze_panes = "C3"
+    ws.auto_filter.ref = (
+        f"A{HEADER_ROW}:{get_column_letter(len(columns))}{data_end_row}"
+    )
     return ws
+
+
+def _autofit_columns(ws, columns: list[tuple[str, str]], data_end_row: int) -> None:
+    """Ajuste la largeur des colonnes au contenu réel (en-tête + données),
+    uniquement sur les onglets Product et Component."""
+    widths = {}
+    for idx, (header, block) in enumerate(columns, start=1):
+        if block == GROUPING:
+            continue
+        longest = len(str(header or ""))
+        for row in range(DATA_START_ROW, data_end_row + 1):
+            value = ws.cell(row=row, column=idx).value
+            if value is not None:
+                longest = max(longest, len(str(value)))
+        widths[idx] = min(longest + 2, 40)
+    for idx, width in widths.items():
+        ws.column_dimensions[get_column_letter(idx)].width = width
 
 
 def _copy_input_data(wb, input_path: Path, overwrite: bool = True) -> None:
@@ -583,5 +603,7 @@ def apply_v093(
         counts = (len(product_rows), len(component_rows))
     if input_path is not None:
         _copy_input_data(wb, Path(input_path), overwrite=counts is None)
+    _autofit_columns(wb["Product"], PRODUCT_COLUMNS, product_end)
+    _autofit_columns(wb["Component"], COMPONENT_COLUMNS, component_end)
     wb.save(output_path)
     return counts

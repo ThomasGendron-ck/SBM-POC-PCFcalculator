@@ -95,6 +95,7 @@ def test_generate_from_synthetic(tmp_path):
     assert by_header["Product Details"].fill.fgColor.rgb == "FFD9D9D9"
     assert by_header["Supplier PCF"].fill.fgColor.rgb == "FFD9D9D9"
     assert ws.freeze_panes == "C3"
+    assert ws.auto_filter.ref.startswith("A2:")
 
     grouped = {
         key
@@ -127,6 +128,7 @@ def test_generate_from_synthetic(tmp_path):
     assert str(data_cell("Data validation flag").value).startswith("=IF(AND(")
     assert data_cell("Transformation DQR value").number_format == "0.000"
     assert data_cell("Supplier PDS").number_format == "0.00%"
+    assert ws.auto_filter.ref.startswith("A2:")
 
     dvs = ws.data_validations.dataValidation
     formulas = {dv.formula1 for dv in dvs}

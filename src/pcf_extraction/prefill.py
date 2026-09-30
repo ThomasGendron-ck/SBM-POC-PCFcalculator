@@ -111,12 +111,41 @@ def build_prefill_rows(
         .drop_duplicates(subset=["PRODUCT"], keep="first")
         .set_index("PRODUCT", drop=False)
     )
+
     raw_materials = (
         purchases.dropna(subset=["RawMat_SubFamily"])
         .sort_values("Weight_KGTotal", ascending=False)
         .drop_duplicates(subset=["PRODUCT"], keep="first")
         .set_index("PRODUCT", drop=False)
     )
+
+    def supplier_of(sku: str) -> tuple[str | None, str | None]:
+        """Supplier Code/Name : MB_Product (BPSNUM/BPSNAM) selon la spec,
+        fallback CK_MaterialPurchase (SUPPLIER_CODE/SUPPLIER_NAME)."""
+        if sku in products.index:
+            row = products.loc[sku]
+            code = _text(row["BPSNUM"]) if "BPSNUM" in products.columns else None
+            name = _text(row["BPSNAM"]) if "BPSNAM" in products.columns else None
+            if code or name:
+                return code, name
+        if sku in purchase_suppliers.index:
+            row = purchase_suppliers.loc[sku]
+            return _text(row["SUPPLIER_CODE"]), _text(row["SUPPLIER_NAME"])
+        return None, None
+
+    def raw_material_of(sku: str) -> str | None:
+        """Matière première : MB_Product (ZCODMAT2) selon la spec,
+        fallback CK_MaterialPurchase (RawMat_SubFamily)."""
+        if sku in products.index:
+            row = products.loc[sku]
+            if "ZCODMAT2" in products.columns:
+                material = _text(row["ZCODMAT2"])
+                if material:
+                    return material
+        if sku in raw_materials.index:
+            return _text(raw_materials.loc[sku]["RawMat_SubFamily"])
+        return None
+
 
     product_rows: list[dict] = []
     for _, lmr in lm.iterrows():
@@ -129,11 +158,7 @@ def build_prefill_rows(
             return _text(prod[column]) if column in products.columns else None
 
         category = attr("Category")
-        supplier_code = supplier_name = None
-        if sku in purchase_suppliers.index:
-            row = purchase_suppliers.loc[sku]
-            supplier_code = _text(row["SUPPLIER_CODE"])
-            supplier_name = _text(row["SUPPLIER_NAME"])
+        supplier_code, supplier_name = supplier_of(sku)
         product_rows.append(
             {
                 "Product SKU": sku,
@@ -163,12 +188,8 @@ def build_prefill_rows(
             return _text(prod[column]) if column in products.columns else None
 
         category = attr("Category")
-        supplier_code = supplier_name = raw_material = None
-        if sku in purchase_suppliers.index:
-            row = purchase_suppliers.loc[sku]
-            supplier_code = _text(row["SUPPLIER_CODE"])
-            supplier_name = _text(row["SUPPLIER_NAME"])
-            raw_material = _text(row["RawMat_SubFamily"])
+        supplier_code, supplier_name = supplier_of(sku)
+        raw_material = raw_material_of(sku)
         component_rows.append(
             {
                 "Component SKU": sku,
