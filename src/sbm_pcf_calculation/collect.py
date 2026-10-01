@@ -125,13 +125,24 @@ def _pick_ck_row(achats: pd.DataFrame, component_ref: str,
     return candidates.sort_values("Weight_KGTotal", ascending=False, na_position="last").iloc[0]
 
 
-def _lookup_ef_packaging(materiaux: pd.DataFrame, matiere: str, description: str | None) -> pd.Series | None:
+def build_ef_packaging_index(materiaux: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Indexe les FE packaging par matière (une passe)."""
+    return {str(matter): rows for matter, rows in materiaux.groupby("RawMat_SubFamily")}
+
+
+def _lookup_ef_packaging(materiaux: pd.DataFrame, matiere: str, description: str | None,
+                         packaging_index: dict[str, pd.DataFrame] | None = None) -> pd.Series | None:
     """Cherche le FE packaging dans CK_EF_Packaging par matière + description."""
     if not matiere:
         return None
-    exact = materiaux[materiaux["RawMat_SubFamily"] == matiere]
-    if exact.empty:
-        return None
+    if packaging_index is not None:
+        exact = packaging_index.get(str(matiere))
+        if exact is None or exact.empty:
+            return None
+    else:
+        exact = materiaux[materiaux["RawMat_SubFamily"] == matiere]
+        if exact.empty:
+            return None
     if description:
         by_desc = exact[exact["CATEGORIE DESCRIPTION"] == description]
         if not by_desc.empty:
@@ -195,12 +206,18 @@ n      composant, fournisseur, UniqueKey et GHG_perunit normalisées ;
     return raw, ck_dedup
 
 
+def build_ck_inbound_index(ck_inbound: pd.DataFrame) -> dict[str, pd.Series]:
+    """Indexe les lignes inbound CK par UniqueKey (une passe)."""
+    return {str(key): row for key, row in ck_inbound.iterrows()}
+
+
 def _lookup_freight(
     raw: dict[str, pd.DataFrame],
     ck_inbound: pd.DataFrame,
     component_ref: str | None,
     supplier_code: str | None,
     freight_index: dict[str, list[dict]] | None = None,
+    ck_inbound_index: dict[str, pd.Series] | None = None,
 ) -> dict:
     """Rattache le trajet fret d'un composant : raw (composant+fournisseur) -> UniqueKey -> CK.
 
@@ -225,10 +242,15 @@ def _lookup_freight(
         if rows.empty:
             continue
         row = rows.iloc[0]
-        ck_row = ck_inbound.loc[ck_inbound.index == row["uniquekey"]]
-        if ck_row.empty:
-            continue
-        ck_row = ck_row.iloc[0]
+        if ck_inbound_index is not None:
+            ck_row = ck_inbound_index.get(str(row["uniquekey"]))
+            if ck_row is None:
+                continue
+        else:
+            ck_rows = ck_inbound.loc[ck_inbound.index == row["uniquekey"]]
+            if ck_rows.empty:
+                continue
+            ck_row = ck_rows.iloc[0]
         return {
             "Freight Route": ck_row[config.FREIGHT_ADDRESSKEY_COL],
             "Freight Transportation Mode": ck_row[config.FREIGHT_MODE_COL],
@@ -450,6 +472,8 @@ def build_collecte(
 
     ck_index = build_ck_index(achats)
     freight_index = build_freight_index(freight_raw)
+    ck_inbound_index = build_ck_inbound_index(ck_inbound)
+    packaging_index = build_ef_packaging_index(ef_packaging)
     rows_out: list[dict] = []
     for _, lm in sample.iterrows():
         sku = _text(lm["SKU"])
@@ -541,7 +565,7 @@ def build_collecte(
                 fe_src = _text(ck_row["Prod_EF_Source"])
                 fe_geo = _text(ck_row["Prod_EF_Geography"])
             else:
-                ef_pack = _lookup_ef_packaging(ef_packaging, matiere, desc_comp) if cf_cat == "PACKAGING" else None
+                ef_pack = _lookup_ef_packaging(ef_packaging, matiere, desc_comp, packaging_index) if cf_cat == "PACKAGING" else None
                 if ef_pack is not None:
                     if recycle > 0 and pd.notna(ef_pack["Recycled_EF_Value"]):
                         fe_nom = _text(ef_pack["Recycled1_EF_Name"]) or f"FE calculé par CK pour {matiere} recyclé"
@@ -565,7 +589,7 @@ def build_collecte(
             if not has_ef:
                 flags.append(FLAG_PAS_DE_FE)
 
-            freight_info = _lookup_freight(freight_raw, ck_inbound, comp_ref, code_fournisseur, freight_index)
+            freight_info = _lookup_freight(freight_raw, ck_inbound, comp_ref, code_fournisseur, freight_index, ck_inbound_index)
             if not freight_info:
                 flags.append(FLAG_PAS_DE_TRAJET_FRET)
 
