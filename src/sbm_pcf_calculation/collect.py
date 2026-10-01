@@ -327,6 +327,26 @@ def build_fe_overrides(matching: pd.DataFrame) -> dict[str, dict]:
     return overrides
 
 
+def agg_freight(df: pd.DataFrame, id_col: str, weight_col: str, ghg_col: str) -> pd.DataFrame:
+    """Agrège les lignes d'achat fret par article.
+
+    GHG_perunit est un facteur kgCO2e/kg : l'émission totale par ligne = facteur * poids.
+    On somme ensuite par article pour obtenir l'émission fret totale du composant (kgCO2e),
+    et on garde aussi le poids total transporté.
+    """
+    df = df.copy()
+    df[id_col] = df[id_col].astype(str).str.strip()
+    for col in (weight_col, ghg_col):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["emission_line"] = df[ghg_col] * df[weight_col]
+    grouped = df.groupby(id_col, dropna=False).agg(
+        poids_total=(weight_col, "sum"),
+        emission_totale=("emission_line", "sum"),
+        nb_lignes_achat=(id_col, "size"),
+    ).reset_index()
+    return grouped
+
+
 def build_collecte(
     input_dir: str | Path,
     transformation: str | Path | None = None,

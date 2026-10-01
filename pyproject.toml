@@ -20,7 +20,6 @@ dev = [
 ]
 
 [project.scripts]
-sbm-pcf-load = "sbm_pcf_calculation.cli:main"
 sbm-pcf-collecte = "sbm_pcf_calculation.cli:main_collecte"
 sbm-pcf-collection = "sbm_pcf_calculation.datashare_cli:main_datashare"
 sbm-pcf = "sbm_pcf_calculation.sbm_pcf_cli:main"

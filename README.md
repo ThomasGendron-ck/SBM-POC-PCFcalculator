@@ -54,7 +54,6 @@ sbm-pcf compute --work-dir ./pcf_workspace --check-baseline save   # réécrit l
 
 - `sbm-pcf-collecte` — fichier de collecte complet avec calcul PCF (v0.3–v0.74)
 - `sbm-pcf-collection` — génération du fichier de collecte LM (ex `pcf-datashare`)
-- `sbm-pcf-load` — extraction POC initiale
 
 ---
 
@@ -90,61 +89,6 @@ pcf-datashare \
   bordures) ; ordre des onglets UserGuide, Product, Component, DQR_Guide
 - Les données saisies du fichier d'entrée sont recopiées vers le nouveau
   layout (renommage `Transformation Energy Name` → `Transformation Energy Type`)
-
-Outil d'extraction et d'analyse des composants pour calculer les facteurs d'émission (PCF — Product Carbon Footprint) à partir des fichiers Excel SBM (Bilan Carbone FY24-25).
-
-Le pipeline produit des rapports détaillés pour prioriser les recherches de données manquantes :
-- **Produits** : référentiel des produits analysés
-- **Relations Produit-Composant** : nomenclature enrichie des émissions par phase
-- **Stats FE manquants** : taux de complétude par phase (Production, Usage, Fin de Vie, Fret amont)
-- **Composants uniques** : liste dédoublonnée avec contribution et nombre de produits concernés
-- **Priorités à investiguer** : composants triés par impact (FE manquants × nb de produits)
-
-## Structure du projet
-
-```
-pcf-extraction/
-├── input/                  # 5 fichiers Excel sources (non versionnés)
-├── data/
-│   ├── raw/                  # Anciens fichiers SBM (v0.2, non versionnés)
-│   ├── interim/              # Données intermédiaires
-│   └── output/               # Rapports générés (non versionnés)
-├── src/pcf_extraction/
-│   ├── __init__.py
-│   ├── cli.py                # Lignes de commande pcf-extract / pcf-collecte
-│   ├── collect.py            # Pipeline « Fichier de collecte » PCF (v0.3)
-│   ├── config.py             # Règles d'extraction et catégorisation SAGE
-│   ├── extract.py            # Pipeline d'extraction v0.2
-│   ├── io_sbm.py             # Lecture des fichiers SBM
-│   └── report.py             # Rapports et statistiques
-├── tests/
-│   ├── test_collect.py       # Règles DQR + non-régression SORHOY15
-│   └── test_report.py        # Tests unitaires
-├── docs/
-├── pyproject.toml
-└── README.md
-```
-
-## Installation
-
-```bash
-cd pcf-extraction
-python -m venv .venv
-source .venv/bin/activate   # Windows : .venv\Scripts\activate
-pip install -e ".[dev]"
-```
-
-## Utilisation
-
-```bash
-pcf-extract \
-  --material "data/raw/SBM_Material_Packaging.xlsx" \
-  --freight "data/raw/SBM_Freight.xlsx" \
-  --sample "data/raw/Echantillon - Produits à analyser.xlsx" \
-  --output "data/output/Extraction_Composants.xlsx"
-```
-
-L'argument `--sample` est optionnel : sans échantillon, le pipeline traite l'intégralité du référentiel.
 
 ## Génération du Fichier de collecte (règles v0.7)
 

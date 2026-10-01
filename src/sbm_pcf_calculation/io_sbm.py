@@ -12,22 +12,6 @@ def load_sheet(path: str, sheet: str, header_row: int) -> pd.DataFrame:
     return df
 
 
-def load_products(path: str) -> pd.DataFrame:
-    return load_sheet(path, "MasterBase_Products", 12)
-
-
-def load_bom(path: str) -> pd.DataFrame:
-    return load_sheet(path, "MasterBase_BOM", 12)
-
-
-def load_components(path: str) -> pd.DataFrame:
-    return load_sheet(path, "CK_MaterialPurchase", 12)
-
-
-def load_freight(path: str, sheet: str, header_row: int = 13) -> pd.DataFrame:
-    return load_sheet(path, sheet, header_row)
-
-
 def load_sample_products(path: str, sheet: str = None) -> pd.DataFrame:
     """Charge le fichier Echantillon - Produits à analyser.
 
