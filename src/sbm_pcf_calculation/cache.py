@@ -52,6 +52,23 @@ def _tables_path(work_dir: Path) -> Path:
     return path
 
 
+def _to_parquet_safe(df: pd.DataFrame, path: Path) -> None:
+    """Write a DataFrame to parquet, coercing mixed-type object columns to str.
+
+    Excel sheets often mix numbers and text in the same column (e.g. user
+    names in 'Last Modifier'), which pyarrow rejects. Those columns carry no
+    calculation logic, so a uniform string representation is acceptable.
+    """
+    try:
+        df.to_parquet(path, index=False)
+    except Exception:
+        fixed = df.copy()
+        for col in fixed.columns:
+            if fixed[col].dtype == object:
+                fixed[col] = fixed[col].astype(str).where(fixed[col].notna(), None)
+        fixed.to_parquet(path, index=False)
+
+
 def save_session(session: PcfSession, work_dir: str | Path) -> None:
     """Persist the session to the work directory (parquet per table)."""
     work_dir = Path(work_dir)
@@ -64,7 +81,7 @@ def save_session(session: PcfSession, work_dir: str | Path) -> None:
         if value is None:
             continue
         if isinstance(value, pd.DataFrame):
-            value.to_parquet(tables / f"{field_obj.name}.parquet", index=False)
+            _to_parquet_safe(value, tables / f"{field_obj.name}.parquet")
         else:
             with open(tables / f"{field_obj.name}.pkl", "wb") as fh:
                 pickle.dump(value, fh)
