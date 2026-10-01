@@ -104,14 +104,27 @@ def load_all_sources(
     lcia = Path(lcia_path) if lcia_path else resolved.get("lcia")
 
     session = PcfSession(metadata={"input_dir": str(input_dir)})
-    session.products = load_product_list(sample)
-    session.product_database = load_product_database(resolved["material"], full_product_extract)
-    session.component_database = load_component_database(resolved["material"])
-    session.bom = load_bom(resolved["mb_bom"])
-    session.materials_and_factors = load_materials_and_factors(resolved["material"])
-    session.freight_tables, session.freight_consolidated = load_freight(resolved["freight"])
+    import time
+
+    def _timed(label, loader):
+        start = time.perf_counter()
+        value = loader()
+        print(f"  {label}: {time.perf_counter() - start:.1f}s", flush=True)
+        return value
+
+    print(f"Loading sources from {input_dir}:", flush=True)
+    session.products = _timed("product list", lambda: load_product_list(sample))
+    session.product_database = _timed(
+        "product database", lambda: load_product_database(resolved["material"], full_product_extract))
+    session.component_database = _timed(
+        "component database", lambda: load_component_database(resolved["material"]))
+    session.bom = _timed("BOM", lambda: load_bom(resolved["mb_bom"]))
+    session.materials_and_factors = _timed(
+        "materials and factors", lambda: load_materials_and_factors(resolved["material"]))
+    freight = _timed("freight", lambda: load_freight(resolved["freight"]))
+    session.freight_tables, session.freight_consolidated = freight
     if lcia is not None and Path(lcia).is_file():
-        session.lcia_base = load_lcia(lcia)
+        session.lcia_base = _timed("LCIA (ecoinvent)", lambda: load_lcia(lcia))
 
     from .cache import save_session
 
