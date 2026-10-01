@@ -5,7 +5,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from pcf_extraction.datashare import (
+from sbm_pcf_calculation.datashare import (
     BLOCK_COLORS,
     DQR_GUIDE_SHEET,
     MANDATORY,

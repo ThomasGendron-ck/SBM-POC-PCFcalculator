@@ -3,8 +3,8 @@
 import pandas as pd
 import pytest
 
-from pcf_extraction.report import priority_missing, stats_missing_factors, unique_components
-from pcf_extraction.extract import _agg_freight
+from sbm_pcf_calculation.report import priority_missing, stats_missing_factors, unique_components
+from sbm_pcf_calculation.extract import _agg_freight
 
 
 @pytest.fixture

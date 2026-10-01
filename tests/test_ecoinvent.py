@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from pcf_extraction.ecoinvent import (
+from sbm_pcf_calculation.ecoinvent import (
     _main_product,
     _pick_geo,
     match_missing_fe,
