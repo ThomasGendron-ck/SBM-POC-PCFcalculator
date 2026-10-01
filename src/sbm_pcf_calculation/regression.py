@@ -63,22 +63,25 @@ def compare_with_baseline(product_results: pd.DataFrame,
     for column in common_columns:
         current_values = merged[column + "_current"]
         baseline_values = merged[column + "_baseline"]
-        numeric = pd.to_numeric(current_values, errors="coerce").notna() & pd.to_numeric(
-            baseline_values, errors="coerce"
-        ).notna()
-        for idx in merged.index:
-            cur, base_val = merged.at[idx, column + "_current"], merged.at[idx, column + "_baseline"]
-            if pd.isna(cur) and pd.isna(base_val):
-                continue
-            if pd.isna(cur) != pd.isna(base_val):
-                diffs.append({key: merged.at[idx, key], "Field": column, "Type": "value drift",
-                              "Baseline": base_val, "Current": cur})
-            elif numeric.loc[idx] and abs(float(cur) - float(base_val)) > TOLERANCE:
-                diffs.append({key: merged.at[idx, key], "Field": column, "Type": "value drift",
-                              "Baseline": base_val, "Current": cur})
-            elif not numeric.loc[idx] and str(cur) != str(base_val):
-                diffs.append({key: merged.at[idx, key], "Field": column, "Type": "text change",
-                              "Baseline": base_val, "Current": cur})
+        cur_num = pd.to_numeric(current_values, errors="coerce")
+        base_num = pd.to_numeric(baseline_values, errors="coerce")
+        numeric = cur_num.notna() & base_num.notna()
+        cur_isna = current_values.isna()
+        base_isna = baseline_values.isna()
+        drift = (
+            (cur_isna != base_isna)
+            | (numeric & ((cur_num - base_num).abs() > TOLERANCE))
+            | (~numeric & ~cur_isna & ~base_isna
+               & (current_values.astype(str) != baseline_values.astype(str)))
+        )
+        for idx in merged.index[drift]:
+            cur, base_val = current_values.loc[idx], baseline_values.loc[idx]
+            if pd.isna(cur) != pd.isna(base_val) or numeric.loc[idx]:
+                diff_type = "value drift"
+            else:
+                diff_type = "text change"
+            diffs.append({key: merged.at[idx, key], "Field": column, "Type": diff_type,
+                          "Baseline": base_val, "Current": cur})
     return pd.DataFrame(diffs, columns=[key, "Field", "Type", "Baseline", "Current"])
 
 

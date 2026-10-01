@@ -6,6 +6,7 @@ step can be re-run quickly during development (no full source reload).
 from __future__ import annotations
 
 import pickle
+import sys
 from dataclasses import fields
 from pathlib import Path
 
@@ -15,6 +16,34 @@ from .sources import PcfSession
 
 SESSION_FILE = "session.pkl"
 TABLES_DIR = "tables"
+SOURCES_FINGERPRINT = "sources_fingerprint"
+
+
+def compute_sources_fingerprint(input_dir: str | Path) -> dict[str, list[int]]:
+    """Stamp of every source file in the input directory: [size, mtime_ns]."""
+    input_dir = Path(input_dir)
+    fingerprint = {}
+    if not input_dir.is_dir():
+        return fingerprint
+    for path in sorted(input_dir.rglob("*.xlsx")):
+        stat = path.stat()
+        fingerprint[str(path)] = [stat.st_size, stat.st_mtime_ns]
+    return fingerprint
+
+
+def _check_sources_fingerprint(session: PcfSession) -> None:
+    """Warn if an Excel source changed since the session was saved."""
+    saved = session.metadata.get(SOURCES_FINGERPRINT)
+    input_dir = session.metadata.get("input_dir")
+    if not saved or not input_dir:
+        return
+    current = compute_sources_fingerprint(input_dir)
+    changed = [path for path, stamp in saved.items() if current.get(path) != stamp]
+    added = sorted(set(current) - set(saved))
+    if changed or added:
+        details = ", ".join(changed + added)
+        print(f"Warning: source files changed since the session was saved: {details}. "
+              "Consider --reload to re-read them.", file=sys.stderr)
 
 
 def _tables_path(work_dir: Path) -> Path:
@@ -37,6 +66,8 @@ def save_session(session: PcfSession, work_dir: str | Path) -> None:
         else:
             with open(tables / f"{field_obj.name}.pkl", "wb") as fh:
                 pickle.dump(value, fh)
+    if isinstance(session.metadata, dict) and session.metadata.get("input_dir"):
+        session.metadata[SOURCES_FINGERPRINT] = compute_sources_fingerprint(session.metadata["input_dir"])
     with open(work_dir / SESSION_FILE, "wb") as fh:
         pickle.dump({}, fh)
 
@@ -60,6 +91,7 @@ def load_session(work_dir: str | Path) -> PcfSession:
         elif pickle_path.is_file():
             with open(pickle_path, "rb") as fh:
                 setattr(session, field_obj.name, pickle.load(fh))
+    _check_sources_fingerprint(session)
     return session
 
 
