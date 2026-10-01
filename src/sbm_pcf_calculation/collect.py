@@ -29,7 +29,7 @@ INPUT_PATTERNS = {
     "mb_bom": "Masterbase_BOM*.xlsx",
     "material": "*Material and Packaging*.xlsx",
     "freight": "*Freight*.xlsx",
-    "lcia": "Cut-off Cumulative LCIA*.xlsx",
+    "lcia": "*Cut-off Cumulative LCIA*.xlsx",
 }
 
 SHEET_MB_PRODUCTS = "MASTERBASE Products"
