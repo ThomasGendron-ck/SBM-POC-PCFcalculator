@@ -107,12 +107,16 @@ def compute_dqr(geography: str | None, source: str | None, has_ef: bool) -> dict
     }
 
 
-def _pick_ck_row(achats: pd.DataFrame, component_ref: str) -> pd.Series | None:
+def _pick_ck_row(achats: pd.DataFrame, component_ref: str,
+                 ck_index: dict[str, pd.Series] | None = None) -> pd.Series | None:
     """Sélectionne la ligne CK_MaterialPurchase de référence d'un composant.
 
     Priorité aux lignes avec un FE valide (> 0), puis au poids acheté le plus
-    élevé (fournisseur principal).
+    élevé (fournisseur principal). `ck_index` (précalculé via build_ck_index)
+    évite de re-scanner tout le tableau à chaque composant.
     """
+    if ck_index is not None:
+        return ck_index.get(str(component_ref))
     rows = achats[achats["PRODUCT"] == component_ref]
     if rows.empty:
         return None
@@ -196,6 +200,7 @@ def _lookup_freight(
     ck_inbound: pd.DataFrame,
     component_ref: str | None,
     supplier_code: str | None,
+    freight_index: dict[str, list[dict]] | None = None,
 ) -> dict:
     """Rattache le trajet fret d'un composant : raw (composant+fournisseur) -> UniqueKey -> CK.
 
@@ -205,8 +210,14 @@ def _lookup_freight(
     """
     if not component_ref:
         return {}
-    for flux, df in raw.items():
-        rows = df[df["component"] == component_ref]
+    entries = (
+        freight_index.get(str(component_ref), [])
+        if freight_index is not None
+        else [{"flux": flux, "rows": df[df["component"] == component_ref]} for flux, df in raw.items()]
+    )
+    for entry in entries:
+        flux = entry["flux"]
+        rows = entry["rows"]
         if supplier_code:
             by_supplier = rows[rows["supplier"] == supplier_code]
             if not by_supplier.empty:
@@ -359,6 +370,28 @@ def agg_freight(df: pd.DataFrame, id_col: str, weight_col: str, ghg_col: str) ->
     return grouped
 
 
+def build_ck_index(achats: pd.DataFrame) -> dict[str, pd.Series]:
+    """Indexe la meilleure ligne CK_MaterialPurchase par composant (une passe)."""
+    ordered = achats.sort_values("Weight_KGTotal", ascending=False, na_position="last")
+    index: dict[str, pd.Series] = {}
+    for component_ref, rows in ordered.groupby("PRODUCT"):
+        with_ef = rows[rows["Prod_EF_Value"].fillna(0) > 0]
+        candidates = with_ef if not with_ef.empty else rows
+        index[str(component_ref)] = candidates.iloc[0]
+    return index
+
+
+def build_freight_index(raw: dict[str, pd.DataFrame]) -> dict[str, list[dict]]:
+    """Indexe les trajets fret par composant, flux par flux (une passe)."""
+    index: dict[str, list[dict]] = {}
+    for flux, df in raw.items():
+        for component_ref, rows in df.groupby("component"):
+            index.setdefault(str(component_ref), []).append(
+                {"flux": flux, "rows": rows}
+            )
+    return index
+
+
 def build_collecte(
     input_dir: str | Path,
     transformation: str | Path | None = None,
@@ -415,6 +448,8 @@ def build_collecte(
     sample["SKU"] = sample["SKU"].map(_text)
     sample = sample.dropna(subset=["SKU"]).drop_duplicates(subset="SKU")
 
+    ck_index = build_ck_index(achats)
+    freight_index = build_freight_index(freight_raw)
     rows_out: list[dict] = []
     for _, lm in sample.iterrows():
         sku = _text(lm["SKU"])
@@ -464,7 +499,7 @@ def build_collecte(
             if comp is None:
                 flags.append(FLAG_PRODUIT_INTROUVABLE)
 
-            ck_row = _pick_ck_row(achats, comp_ref)
+            ck_row = _pick_ck_row(achats, comp_ref, ck_index)
 
             item_weight = _num(comp["Item weight"]) if comp is not None else np.nan
             gross_weight = _num(comp["GROSS_WEIGHT0"]) if comp is not None else np.nan
@@ -530,7 +565,7 @@ def build_collecte(
             if not has_ef:
                 flags.append(FLAG_PAS_DE_FE)
 
-            freight_info = _lookup_freight(freight_raw, ck_inbound, comp_ref, code_fournisseur)
+            freight_info = _lookup_freight(freight_raw, ck_inbound, comp_ref, code_fournisseur, freight_index)
             if not freight_info:
                 flags.append(FLAG_PAS_DE_TRAJET_FRET)
 
