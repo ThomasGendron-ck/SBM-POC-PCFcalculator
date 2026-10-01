@@ -57,6 +57,8 @@ def save_session(session: PcfSession, work_dir: str | Path) -> None:
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     tables = _tables_path(work_dir)
+    if isinstance(session.metadata, dict) and session.metadata.get("input_dir"):
+        session.metadata[SOURCES_FINGERPRINT] = compute_sources_fingerprint(session.metadata["input_dir"])
     for field_obj in fields(session):
         value = getattr(session, field_obj.name)
         if value is None:
