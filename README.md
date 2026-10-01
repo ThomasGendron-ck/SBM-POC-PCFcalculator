@@ -1,3 +1,47 @@
+# SBM PCF Calculation
+
+Outil de calcul des PCF (Product Carbon Footprint) des produits SBM à partir
+des fichiers Excel du Bilan Carbone (Masterbase, BOM, matières et facteurs
+d'émission, fret amont) — ici sur un extrait de références Leroy Merlin (LM).
+
+## Pipeline unifié `sbm-pcf`
+
+Chaque étape est appelable séparément. Par défaut les données proviennent de la
+session en cache (`--work-dir`) : rapide en développement. `--reload` recharge
+tous les fichiers Excel sources.
+
+```bash
+sbm-pcf load      --input ./input --work-dir ./pcf_workspace     # 1. charger les sources
+sbm-pcf collect   --work-dir ./pcf_workspace --output collection.xlsx   # 2a. fichier de collecte
+# ... fichier rempli par SBM / fournisseurs ...
+sbm-pcf activity  --work-dir ./pcf_workspace --collection collection_filled.xlsx  # 2b. données d'activité manquantes
+sbm-pcf ef-match  --work-dir ./pcf_workspace                     # 2c. matching FE manquants (ecoinvent)
+sbm-pcf compute   --work-dir ./pcf_workspace                     # 2d. calcul des PCF + flags HIGH/MEDIUM/LOW
+sbm-pcf report    --work-dir ./pcf_workspace --output PCF_LM.pdf [--selection produits.xlsx]  # 2e. rapport PDF
+```
+
+### Structure du package (`src/sbm_pcf_calculation/`)
+
+- `sources.py` — chargement des inputs (liste produits, Masterbase, BOM, matières
+  et FE, fret, LCIA ecoinvent) + `PcfSession` (conteneur de données)
+- `cache.py` — sauvegarde/rechargement de la session (parquet, sans relire les Excel)
+- `collection.py` / `datashare.py` + `prefill.py` — fichier de collecte LM (spec v0.95/0.96)
+- `activity.py` — évaluation des données d'activité manquantes (fichier rempli)
+- `EF_Matching.py` — matching des facteurs d'émission manquants avec ecoinvent
+- `pcf_calc.py` — calcul des PCF par produit, DQR/PDS, flags de qualité
+- `pdf_report.py` — rapport PDF (WeasyPrint, gabarit HTML/CSS modifiable :
+  `src/sbm_pcf_calculation/templates/pcf_report.html`) ; `load_pcf_selection()`
+  charge un fichier listant les PCF à générer (xlsx/csv)
+- `sbm_pcf_cli.py` — ligne de commande `sbm-pcf`
+
+### Commandes historiques (conservées)
+
+- `sbm-pcf-collecte` — fichier de collecte complet avec calcul PCF (v0.3–v0.74)
+- `sbm-pcf-collection` — génération du fichier de collecte LM (ex `pcf-datashare`)
+- `sbm-pcf-load` — extraction POC initiale
+
+---
+
 # PCF Extraction — Extraction et analyse des composants SBM
 
 ## Génération v0.93 du fichier de collecte LM (pcf-datashare)
