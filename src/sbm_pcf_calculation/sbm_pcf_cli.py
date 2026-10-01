@@ -176,11 +176,18 @@ def main(argv=None) -> int:
     parser.add_argument("--reload", action="store_true", help="Full source reload instead of cached session")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    def _add_global_options(sub_parser):
+        sub_parser.add_argument("--work-dir", default=argparse.SUPPRESS,
+                                help="Session work directory (cache)")
+        sub_parser.add_argument("--reload", action="store_true", default=argparse.SUPPRESS,
+                                help="Full source reload instead of cached session")
+
     load = sub.add_parser("load", help="Load all source files into the cached session")
     load.add_argument("--input", required=True, help="Input directory with the SBM source files")
     load.add_argument("--sample", default=None, help="Product list file (default: LM referencing file)")
     load.add_argument("--lcia", default=None, help="Ecoinvent Cut-off Cumulative LCIA file")
     load.add_argument("--full-product-extract", default=None, help="Complete Masterbase products extract")
+    _add_global_options(load)
     load.set_defaults(func=cmd_load)
 
     collect = sub.add_parser("collect", help="Generate the data collection workbook")
@@ -189,16 +196,19 @@ def main(argv=None) -> int:
     collect.add_argument("--spec", default=None, help="Specifications file (v0.95)")
     collect.add_argument("--material", default=None, help="Material and Packaging ExtractPourPCF file")
     collect.add_argument("--mb-product", default=None, help="Complete Masterbase products extract")
+    _add_global_options(collect)
     collect.set_defaults(func=cmd_collect)
 
     activity = sub.add_parser("activity", help="Assess missing activity data on a filled collection file")
     activity.add_argument("--collection", required=True, help="Filled collection workbook (.xlsx)")
     activity.add_argument("--output", default=None, help="Missing activity data report (.xlsx)")
+    _add_global_options(activity)
     activity.set_defaults(func=cmd_activity)
 
     ef_match = sub.add_parser("ef-match", help="Match missing emission factors with ecoinvent")
     ef_match.add_argument("--lcia", default=None, help="LCIA file (if not in the cached session)")
     ef_match.add_argument("--output", default=None, help="Matching output (.xlsx)")
+    _add_global_options(ef_match)
     ef_match.set_defaults(func=cmd_ef_match)
 
     compute = sub.add_parser("compute", help="Compute PCF per product with quality flags")
@@ -213,15 +223,23 @@ def main(argv=None) -> int:
         "(baselines/pcf_results_baseline.csv), or a path to an existing "
         "baseline file. The command fails (exit code 2) if results drifted.",
     )
+    _add_global_options(compute)
     compute.set_defaults(func=cmd_compute)
 
     report = sub.add_parser("report", help="Generate the PCF PDF report")
     report.add_argument("--output", default="SBM_PCF_report.pdf", help="Output PDF path")
     report.add_argument("--selection", default=None, help="File listing the PCFs to generate (xlsx/csv)")
     report.add_argument("--template", default=None, help="Custom HTML template for the report")
+    _add_global_options(report)
     report.set_defaults(func=cmd_report)
 
+    import argparse as _ap
+
     args = parser.parse_args(argv)
+    if not hasattr(args, "work_dir"):
+        args.work_dir = "./pcf_workspace"
+    if not hasattr(args, "reload"):
+        args.reload = False
     _work_dir(args)
     try:
         return args.func(args)
