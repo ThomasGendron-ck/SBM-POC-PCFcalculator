@@ -35,7 +35,7 @@ def _check_sources_fingerprint(session: PcfSession) -> None:
     """Warn if an Excel source changed since the session was saved."""
     saved = session.metadata.get(SOURCES_FINGERPRINT)
     input_dir = session.metadata.get("input_dir")
-    if not saved or not input_dir:
+    if saved is None or not input_dir:
         return
     current = compute_sources_fingerprint(input_dir)
     changed = [path for path, stamp in saved.items() if current.get(path) != stamp]
