@@ -70,7 +70,7 @@ class TestActivity:
     def test_report_lists_missing_per_sku(self, filled_collection):
         report = activity_data_report(filled_collection)
         assert len(report) == 2
-        all_missing = set(report["Missing fields"])
+        all_missing = " | ".join(report["Missing fields"])
         assert "Supplier Code" in all_missing
 
     def test_sorted_by_impacted_products(self, filled_collection):
