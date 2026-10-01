@@ -111,10 +111,14 @@ class TestCommittedBaseline:
         assert "Product SKU" in baseline.columns
         assert "PCF Value" in baseline.columns
 
-    def test_results_against_committed_baseline(self, baseline_results):
-        """Template test: replace baseline_results by the current computation
-        output to run the regression against the committed baseline."""
-        if not DEFAULT_BASELINE.is_file():
-            pytest.skip("No committed baseline yet")
-        report = check_regression(baseline_results)
-        assert report.empty, f"PCF results regressed:\n{report.to_string(index=False)}"
+    def test_check_regression_flow(self, tmp_path, baseline_results):
+        """Full flow as used in production: save a validated baseline, then
+        check the same results against it (no diff), then check modified
+        results (drift reported)."""
+        path = save_baseline(baseline_results, tmp_path / "baseline.csv")
+        report = check_regression(baseline_results.copy(), path)
+        assert report.empty
+        drifted = baseline_results.copy()
+        drifted.loc[drifted["Product SKU"] == "PRODUCT2", "PCF Value"] = 9.99
+        report = check_regression(drifted, path)
+        assert not report[report["Type"] == "value drift"].empty
