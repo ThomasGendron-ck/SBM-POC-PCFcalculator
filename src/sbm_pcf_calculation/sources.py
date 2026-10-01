@@ -112,15 +112,29 @@ def load_all_sources(
         print(f"  {label}: {time.perf_counter() - start:.1f}s", flush=True)
         return value
 
+    import pandas as pd
+
+    from .io_sbm import _excel_engine
+
     print(f"Loading sources from {input_dir}:", flush=True)
     session.products = _timed("product list", lambda: load_product_list(sample))
-    session.product_database = _timed(
-        "product database", lambda: load_product_database(resolved["material"], full_product_extract))
+    engine = _excel_engine(str(resolved["material"]))
+    material_xls = _timed(
+        "open Material and Packaging",
+        lambda: pd.ExcelFile(resolved["material"], engine=engine) if engine else pd.ExcelFile(resolved["material"]),
+    )
+    if full_product_extract is not None:
+        session.product_database = _timed(
+            "product database",
+            lambda: load_product_database(resolved["material"], full_product_extract))
+    else:
+        session.product_database = _timed(
+            "product database", lambda: load_product_database(material_xls))
     session.component_database = _timed(
-        "component database", lambda: load_component_database(resolved["material"]))
-    session.bom = _timed("BOM", lambda: load_bom(resolved["mb_bom"]))
+        "component database", lambda: load_component_database(material_xls))
     session.materials_and_factors = _timed(
-        "materials and factors", lambda: load_materials_and_factors(resolved["material"]))
+        "materials and factors", lambda: load_materials_and_factors(material_xls))
+    session.bom = _timed("BOM", lambda: load_bom(resolved["mb_bom"]))
     freight = _timed("freight", lambda: load_freight(resolved["freight"]))
     session.freight_tables, session.freight_consolidated = freight
     if lcia is not None and Path(lcia).is_file():

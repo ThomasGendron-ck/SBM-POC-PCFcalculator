@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from . import config
-from .io_sbm import load_sheet
+from .io_sbm import load_sheet, load_sheet_columns
 
 HEADER_EF_PACKAGING = 4
 HEADER_MATERIAL_PURCHASE = 12
@@ -145,13 +145,19 @@ n      composant, fournisseur, UniqueKey et GHG_perunit normalisées ;
     """
     raw: dict[str, pd.DataFrame] = {}
     for flux, spec in config.FREIGHT_SHEETS.items():
-        df = load_sheet(freight_path, spec["sheet"], spec["header_row"])
-        df = df[[
+        needed = [
             spec["component_col"],
             spec["supplier_col"],
             config.FREIGHT_UNIQUEKEY_COL,
             config.FREIGHT_GHG_PERUNIT_COL,
-        ]].copy()
+        ]
+        df = load_sheet_columns(freight_path, spec["sheet"], spec["header_row"], needed)
+        missing = [c for c in needed if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"Colonnes fret introuvables dans l'onglet {spec['sheet']} : {missing}. "
+                f"Colonnes disponibles : {list(df.columns)}"
+            )
         df.columns = ["component", "supplier", "uniquekey", "ghg_perunit"]
         for col in ("component", "supplier", "uniquekey"):
             df[col] = df[col].map(_text)
@@ -160,7 +166,13 @@ n      composant, fournisseur, UniqueKey et GHG_perunit normalisées ;
         df["ghg_perunit"] = df.groupby("uniquekey")["ghg_perunit"].transform("mean")
         raw[flux] = df
 
-    ck = load_sheet(freight_path, config.FREIGHT_CK_SHEET, config.FREIGHT_CK_HEADER_ROW)
+    ck_needed = [
+        config.FREIGHT_FRET_TYPE_COL,
+        config.FREIGHT_UNIQUEKEY_COL,
+        config.FREIGHT_ADDRESSKEY_COL,
+        config.FREIGHT_MODE_COL,
+    ]
+    ck = load_sheet_columns(freight_path, config.FREIGHT_CK_SHEET, config.FREIGHT_CK_HEADER_ROW, ck_needed)
     ck = ck[ck[config.FREIGHT_FRET_TYPE_COL].fillna("").str.startswith(config.FREIGHT_FRET_TYPE_PREFIX)].copy()
     ck[config.FREIGHT_FRET_TYPE_COL] = (
         ck[config.FREIGHT_FRET_TYPE_COL]
