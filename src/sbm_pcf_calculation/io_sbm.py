@@ -13,7 +13,10 @@ def resolve_sheet_name(path, sheet: str) -> str:
     `path` peut être un chemin ou un pd.ExcelFile déjà ouvert (évite de relire
     le classeur). Lève une erreur explicite listant les onglets disponibles.
     """
-    names = list(pd.ExcelFile(path).sheet_names) if isinstance(path, str) else list(path.sheet_names)
+    if hasattr(path, "sheet_names"):
+        names = list(path.sheet_names)
+    else:
+        names = list(pd.ExcelFile(path).sheet_names)
     target = _normalize_name(sheet)
     for name in names:
         if _normalize_name(name) == target:
