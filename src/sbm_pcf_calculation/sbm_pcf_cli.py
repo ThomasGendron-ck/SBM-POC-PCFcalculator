@@ -223,7 +223,14 @@ def main(argv=None) -> int:
 
     args = parser.parse_args(argv)
     _work_dir(args)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except (ValueError, KeyError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

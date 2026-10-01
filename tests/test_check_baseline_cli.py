@@ -82,3 +82,24 @@ def _fake_session(results):
     session = PcfSession(product_results=results)
     session.metadata["work_dir"] = "."
     return session
+
+
+class TestCliErrorHandling:
+    def test_missing_input_dir_reports_clean_error(self, tmp_path, capsys):
+        code = sbm_pcf_cli.main(["load", "--input", str(tmp_path / "nope")])
+        assert code == 1
+        err = capsys.readouterr().err
+        assert "Error:" in err and "Traceback" not in err
+
+    def test_missing_source_file_reports_clean_error(self, tmp_path, capsys):
+        (tmp_path / "input").mkdir()
+        code = sbm_pcf_cli.main(["load", "--input", str(tmp_path / "input")])
+        assert code == 1
+        err = capsys.readouterr().err
+        assert "Error:" in err and "Traceback" not in err
+
+    def test_missing_session_reports_clean_error(self, tmp_path, capsys):
+        code = sbm_pcf_cli.main(["--work-dir", str(tmp_path / "wd"), "compute"])
+        assert code == 1
+        err = capsys.readouterr().err
+        assert "Error:" in err and "Traceback" not in err
