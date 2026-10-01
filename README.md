@@ -20,6 +20,22 @@ sbm-pcf compute   --work-dir ./pcf_workspace                     # 2d. calcul de
 sbm-pcf report    --work-dir ./pcf_workspace --output PCF_LM.pdf [--selection produits.xlsx]  # 2e. rapport PDF
 ```
 
+### Test de non-régression (`compute --check-baseline`)
+
+La baseline validée est versionée dans `baselines/pcf_results_baseline.csv`.
+
+```bash
+sbm-pcf compute --work-dir ./pcf_workspace --check-baseline baselines/pcf_results_baseline.csv
+sbm-pcf compute --work-dir ./pcf_workspace --check-baseline save   # réécrit la baseline (changement volontaire)
+```
+
+- Le check compare les résultats au CSV : nouveau/produit manquant, dérive de
+  valeur, changement de texte. Vide = OK.
+- En cas de dérive : rapport affiché sur stderr et **code retour 2**.
+- `'save'` réécrit `baselines/pcf_results_baseline.csv` avec les résultats
+  courants (à utiliser après un changement validé, jamais pour « faire passer »
+  un check).
+
 ### Structure du package (`src/sbm_pcf_calculation/`)
 
 - `sources.py` — chargement des inputs (liste produits, Masterbase, BOM, matières

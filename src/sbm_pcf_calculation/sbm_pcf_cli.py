@@ -135,6 +135,20 @@ def cmd_compute(args) -> int:
     out = Path(args.output or "pcf_results.xlsx")
     results.to_excel(out, index=False)
     print(f"Results written: {out}")
+    if args.check_baseline:
+        from .regression import check_regression, save_baseline
+
+        if args.check_baseline == "save":
+            path = save_baseline(results)
+            print(f"Baseline saved: {path}")
+        else:
+            report = check_regression(results, args.check_baseline)
+            if report.empty:
+                print("Non-regression check passed: results match the baseline.")
+            else:
+                print("PCF RESULTS REGRESSED against the baseline:", file=sys.stderr)
+                print(report.to_string(index=False), file=sys.stderr)
+                return 2
     return 0
 
 
@@ -190,6 +204,15 @@ def main(argv=None) -> int:
     compute = sub.add_parser("compute", help="Compute PCF per product with quality flags")
     compute.add_argument("--transformation", default=None, help="Filled transformation input file")
     compute.add_argument("--output", default=None, help="Results output (.xlsx)")
+    compute.add_argument(
+        "--check-baseline",
+        default=None,
+        metavar="BASELINE",
+        help="Non-regression check against a baseline CSV. Use the special value "
+        "'save' to write the current results as the new baseline "
+        "(baselines/pcf_results_baseline.csv), or a path to an existing "
+        "baseline file. The command fails (exit code 2) if results drifted.",
+    )
     compute.set_defaults(func=cmd_compute)
 
     report = sub.add_parser("report", help="Generate the PCF PDF report")

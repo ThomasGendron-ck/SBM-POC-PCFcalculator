@@ -16,16 +16,16 @@ KEY_COLUMN = "Product SKU"
 TOLERANCE = 1e-9
 
 
-def save_baseline(product_results: pd.DataFrame, baseline_path: str | Path = DEFAULT_BASELINE) -> Path:
+def save_baseline(product_results: pd.DataFrame, baseline_path: str | Path | None = None) -> Path:
     """Store the current validated results as the new regression baseline."""
-    path = Path(baseline_path)
+    path = Path(baseline_path or DEFAULT_BASELINE)
     path.parent.mkdir(parents=True, exist_ok=True)
     product_results.to_csv(path, index=False)
     return path
 
 
-def load_baseline(baseline_path: str | Path = DEFAULT_BASELINE) -> pd.DataFrame:
-    path = Path(baseline_path)
+def load_baseline(baseline_path: str | Path | None = None) -> pd.DataFrame:
+    path = Path(baseline_path or DEFAULT_BASELINE)
     if not path.is_file():
         raise FileNotFoundError(f"Baseline not found: {path}")
     return pd.read_csv(path)
@@ -83,6 +83,6 @@ def compare_with_baseline(product_results: pd.DataFrame,
 
 
 def check_regression(product_results: pd.DataFrame,
-                     baseline_path: str | Path = DEFAULT_BASELINE) -> pd.DataFrame:
+                     baseline_path: str | Path | None = None) -> pd.DataFrame:
     """Load the baseline and return the regression report (empty = OK)."""
     return compare_with_baseline(product_results, load_baseline(baseline_path))
