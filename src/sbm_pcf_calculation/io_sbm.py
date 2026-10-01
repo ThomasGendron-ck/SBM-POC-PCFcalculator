@@ -77,11 +77,17 @@ def load_sheet(path, sheet: str, header_row: int) -> pd.DataFrame:
 def load_sample_products(path: str, sheet: str = None) -> pd.DataFrame:
     """Charge le fichier Echantillon - Produits à analyser.
 
-    Détecte automatiquement l'onglet et la colonne SKU si non fournis.
+    Détecte automatiquement l'onglet et la colonne SKU si non fournis. Pour le
+    Référencement LM, l'onglet « Export » (colonne « Num Reference fournisseur »)
+    est la liste de calcul complète — il est priorisé s'il est présent.
     """
     xls = pd.ExcelFile(path)
-    sheet = sheet or xls.sheet_names[0]
+    if sheet is None:
+        sheet = next((s for s in xls.sheet_names if str(s).strip().lower() == "export"), xls.sheet_names[0])
     df = pd.read_excel(path, sheet_name=sheet)
+    df.columns = [str(c).strip() for c in df.columns]
+    if "Num Reference fournisseur" in df.columns:
+        df = df.rename(columns={"Num Reference fournisseur": "SKU", "Designation article": "Designation"})
     df.columns = [str(c).strip() for c in df.columns]
     sku_col = next(
         (c for c in df.columns if "sku" in str(c).lower() or "product" in str(c).lower() or "id" in str(c).lower()),
