@@ -63,12 +63,14 @@ def flag_suspect_products(product_results: pd.DataFrame,
     """Attach a quality flag level (HIGH / MEDIUM / LOW) per product based on
     the validation flags raised on its component lines."""
     if component_lines is not None and "Flag" in component_lines.columns:
-        flags_by_product = {}
-        for _, row in component_lines.iterrows():
-            flag = row["Flag"]
-            if pd.isna(flag) or not str(flag).strip():
-                continue
-            flags_by_product.setdefault(row["Product SKU"], []).extend(str(flag).split(" | "))
+        flags = component_lines["Flag"].fillna("").astype(str).str.strip()
+        exploded = (
+            component_lines.assign(_flag=flags)
+            [flags.ne("")][["Product SKU", "_flag"]]
+            .assign(_flag=lambda d: d["_flag"].str.split(" | ", regex=False))
+            .explode("_flag")
+        )
+        flags_by_product = exploded.groupby("Product SKU")["_flag"].agg(list).to_dict()
         levels = []
         for sku in product_results["Product SKU"]:
             flags = flags_by_product.get(sku, [])
@@ -95,12 +97,32 @@ def run_pcf_calculation(session: PcfSession,
                         reload_sources: bool = False) -> PcfSession:
     """Full calculation flow: component lines -> per-product PCF -> flags.
     Saves the results back into the session."""
-    component_lines = build_component_lines(session, transformation_path)
-    product_results = compute_pcf_per_product(component_lines)
-    product_results = flag_suspect_products(product_results, component_lines)
+    import time
+
+    def _timed(label, step):
+        start = time.perf_counter()
+        value = step()
+        print(f"  {label}: {time.perf_counter() - start:.1f}s", flush=True)
+        return value
+
+    print("Computing PCF:", flush=True)
+    component_lines = _timed(
+        "component lines (BOM x factors x freight)",
+        lambda: build_component_lines(session, transformation_path),
+    )
+    product_results = _timed(
+        "PCF per product", lambda: compute_pcf_per_product(component_lines))
+    product_results = _timed(
+        "quality flags",
+        lambda: flag_suspect_products(product_results, component_lines),
+    )
     session.component_results = component_lines
     session.product_results = product_results
+    _timed("save session", lambda: _save_session(session))
+    return session
+
+
+def _save_session(session: PcfSession) -> None:
     from .cache import save_session
 
     save_session(session, session.metadata.get("work_dir", "."))
-    return session
