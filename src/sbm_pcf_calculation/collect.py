@@ -108,7 +108,7 @@ def compute_dqr(geography: str | None, source: str | None, has_ef: bool) -> dict
 
 
 def _pick_ck_row(achats: pd.DataFrame, component_ref: str,
-                 ck_index: dict[str, pd.Series] | None = None) -> pd.Series | None:
+                 ck_index: dict[str, dict] | None = None) -> dict | None:
     """Sélectionne la ligne CK_MaterialPurchase de référence d'un composant.
 
     Priorité aux lignes avec un FE valide (> 0), puis au poids acheté le plus
@@ -392,14 +392,14 @@ def agg_freight(df: pd.DataFrame, id_col: str, weight_col: str, ghg_col: str) ->
     return grouped
 
 
-def build_ck_index(achats: pd.DataFrame) -> dict[str, pd.Series]:
+def build_ck_index(achats: pd.DataFrame) -> dict[str, dict]:
     """Indexe la meilleure ligne CK_MaterialPurchase par composant (une passe)."""
     ordered = achats.sort_values("Weight_KGTotal", ascending=False, na_position="last")
-    index: dict[str, pd.Series] = {}
+    index: dict[str, dict] = {}
     for component_ref, rows in ordered.groupby("PRODUCT"):
         with_ef = rows[rows["Prod_EF_Value"].fillna(0) > 0]
         candidates = with_ef if not with_ef.empty else rows
-        index[str(component_ref)] = candidates.iloc[0]
+        index[str(component_ref)] = candidates.iloc[0].to_dict()
     return index
 
 
@@ -474,12 +474,13 @@ def build_collecte(
     freight_index = build_freight_index(freight_raw)
     ck_inbound_index = build_ck_inbound_index(ck_inbound)
     packaging_index = build_ef_packaging_index(ef_packaging)
+    produits_records: dict[str, dict] = produits.to_dict("index")
     rows_out: list[dict] = []
     for _, lm in sample.iterrows():
         sku = _text(lm["SKU"])
         flags_produit: list[str] = []
 
-        prod = produits.loc[sku] if sku in produits.index else None
+        prod = produits_records.get(sku)
         if prod is None:
             flags_produit.append(FLAG_PRODUIT_INTROUVABLE)
 
@@ -510,7 +511,7 @@ def build_collecte(
             continue
 
         comp_rows: list[dict] = []
-        for _, bom_row in bom_prod.iterrows():
+        for bom_row in bom_prod.to_dict("records"):
             row = dict(base_produit)
             flags = list(flags_produit)
 
@@ -519,7 +520,7 @@ def build_collecte(
                 flags.append(FLAG_QTE_NULLE)
 
             comp_ref = _text(bom_row["CPNITMREF"])
-            comp = produits.loc[comp_ref] if comp_ref in produits.index else None
+            comp = produits_records.get(comp_ref)
             if comp is None:
                 flags.append(FLAG_PRODUIT_INTROUVABLE)
 
