@@ -109,20 +109,27 @@ MISSING_EF_FROM_MATCHING: dict[str, str] = {
 }
 
 
+def _select_columns(df: pd.DataFrame, columns: list[tuple[str, str | None]]) -> pd.DataFrame:
+    """Project df onto the spec columns in spec order, filling defaults.
+    Built with a single concat to avoid DataFrame fragmentation (123+ columns)."""
+    df = df.copy()
+    parts = []
+    for name, _fmt in columns:
+        if name in df.columns:
+            parts.append(df[[name]])
+        elif name in DEFAULT_VALUES:
+            parts.append(pd.DataFrame({name: [DEFAULT_VALUES[name]] * len(df)}, index=df.index))
+        else:
+            parts.append(pd.DataFrame({name: [None] * len(df)}, index=df.index))
+    return pd.concat(parts, axis=1)
+
+
 def _product_only_pcf_sheet(product_results: pd.DataFrame | None) -> pd.DataFrame:
     """PCF_Calculation sheet with product-level rows only (no component lines)."""
-    df = product_results.copy() if product_results is not None else pd.DataFrame()
+    df = product_results.copy() if product_results is not None else pd.DataFrame(index=[0])
     rename = {"PCF Value": "PCF GHG Value", "PCF Unit": "PCF GHG Unit"}
     df = df.rename(columns=rename)
-    out = pd.DataFrame(index=df.index)
-    for name, _fmt in PCF_COLUMNS:
-        if name in df.columns:
-            out[name] = df[name]
-        elif name in DEFAULT_VALUES:
-            out[name] = DEFAULT_VALUES[name]
-        else:
-            out[name] = None
-    return out[[name for name, _ in PCF_COLUMNS]]
+    return _select_columns(df, PCF_COLUMNS)
 
 
 def build_pcf_sheet(component_lines: pd.DataFrame,
@@ -130,19 +137,11 @@ def build_pcf_sheet(component_lines: pd.DataFrame,
     """PCF_Calculation sheet: one row per (product, component) line."""
     df = component_lines.copy()
     df = df.rename(columns=PCF_COLUMN_MAP)
-    out = pd.DataFrame(index=df.index)
-    for name, _fmt in PCF_COLUMNS:
-        if name in df.columns:
-            out[name] = df[name]
-        elif name in DEFAULT_VALUES:
-            out[name] = DEFAULT_VALUES[name]
-        else:
-            out[name] = None
     if product_results is not None and "Flag level" in product_results.columns:
         flag_map = product_results.set_index("Product SKU")["Flag level"]
-        out["Data validation flag"] = out["Product SKU"].map(flag_map)
-        out["Data validation flag impact"] = out["Data validation flag"]
-    return out[[name for name, _ in PCF_COLUMNS]]
+        df["Data validation flag"] = df["Product SKU"].map(flag_map)
+        df["Data validation flag impact"] = df["Data validation flag"]
+    return _select_columns(df, PCF_COLUMNS)
 
 
 def build_missing_ef_sheet(component_lines: pd.DataFrame,
@@ -171,15 +170,7 @@ def build_missing_ef_sheet(component_lines: pd.DataFrame,
             missing["RM AutoMatch EF PDS"] = [
                 0 if sku in matched_skus else None for sku in missing["Component SKU"]
             ]
-    out = pd.DataFrame(index=missing.index)
-    for name, _fmt in MISSING_EF_COLUMNS:
-        if name in missing.columns:
-            out[name] = missing[name]
-        elif name in DEFAULT_VALUES:
-            out[name] = DEFAULT_VALUES[name]
-        else:
-            out[name] = None
-    return out[[name for name, _ in MISSING_EF_COLUMNS]]
+    return _select_columns(missing, MISSING_EF_COLUMNS)
 
 
 def _column_index(columns: list[str], name: str) -> int:
@@ -198,7 +189,6 @@ def _style_sheet(ws, columns: list[tuple[str, str | None]],
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
-    n_cols = len(sheet_columns)
     header_fill = PatternFill("solid", fgColor="D9E1F2")
     mandatory_fill = PatternFill("solid", fgColor="FFF2CC")
 
@@ -215,9 +205,6 @@ def _style_sheet(ws, columns: list[tuple[str, str | None]],
         cell.fill = header_fill
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal="center", wrap_text=True)
-        if fmt:
-            for row in range(3, ws.max_row + 1):
-                ws.cell(row=row, column=idx).number_format = fmt
     ws.row_dimensions[2].height = 45.0
     # Column groups (outline levels).
     group_level = 1
@@ -242,20 +229,33 @@ def write_pcf_results(output_path: str | Path,
                       product_results: pd.DataFrame | None = None,
                       matching: pd.DataFrame | None = None) -> Path:
     """Write the pcf_results.xlsx deliverable (PCF_Calculation + MissingEF_Matching)."""
-    from openpyxl import load_workbook
+    from openpyxl import Workbook
 
     pcf_sheet = build_pcf_sheet(component_lines, product_results) if component_lines is not None else _product_only_pcf_sheet(product_results)
     missing_sheet = build_missing_ef_sheet(component_lines, matching) if component_lines is not None else pd.DataFrame(columns=[name for name, _ in MISSING_EF_COLUMNS])
 
     output_path = Path(output_path)
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        pcf_sheet.to_excel(writer, sheet_name="PCF_Calculation", index=False)
-        missing_sheet.to_excel(writer, sheet_name="MissingEF_Matching", index=False)
-
-    workbook = load_workbook(output_path)
-    _style_sheet(workbook["PCF_Calculation"], PCF_COLUMNS,
-                 [name for name, _ in PCF_COLUMNS], COLUMN_GROUPS_PCF)
-    _style_sheet(workbook["MissingEF_Matching"], MISSING_EF_COLUMNS,
-                 [name for name, _ in MISSING_EF_COLUMNS], COLUMN_GROUPS_MISSING_EF)
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    for sheet_name, df, columns, groups in (
+        ("PCF_Calculation", pcf_sheet, PCF_COLUMNS, COLUMN_GROUPS_PCF),
+        ("MissingEF_Matching", missing_sheet, MISSING_EF_COLUMNS, COLUMN_GROUPS_MISSING_EF),
+    ):
+        ws = workbook.create_sheet(sheet_name)
+        _write_sheet_rows(ws, df, columns)
+        _style_sheet(ws, columns, [name for name, _ in columns], groups)
     workbook.save(output_path)
     return output_path
+
+
+def _write_sheet_rows(ws, df: pd.DataFrame,
+                     columns: list[tuple[str, str | None]]) -> None:
+    """Write the data rows with per-column number formats in one pass."""
+    values = df.values.tolist()
+    for row_idx, row in enumerate(values, start=3):
+        ws.append(row)
+    for col_idx, (_name, fmt) in enumerate(columns, start=1):
+        if not fmt:
+            continue
+        for row_idx in range(3, 3 + len(values)):
+            ws.cell(row=row_idx, column=col_idx).number_format = fmt
