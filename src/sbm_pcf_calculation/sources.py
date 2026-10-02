@@ -135,6 +135,14 @@ def load_all_sources(
     session.materials_and_factors = _timed(
         "materials and factors", lambda: load_materials_and_factors(material_xls))
     session.bom = _timed("BOM", lambda: load_bom(resolved["mb_bom"]))
+    if full_product_extract is None:
+        from .collect import HEADER_MB_PRODUCTS, SHEET_MB_PRODUCTS
+        from .io_sbm import load_sheet as _load_sheet
+
+        session.product_database = _timed(
+            "product database (Masterbase extract)",
+            lambda: _load_sheet(resolved["mb_products"], SHEET_MB_PRODUCTS, HEADER_MB_PRODUCTS),
+        )
     freight = _timed("freight", lambda: load_freight(resolved["freight"]))
     session.freight_tables, session.freight_consolidated = freight
     if lcia is not None and Path(lcia).is_file():
