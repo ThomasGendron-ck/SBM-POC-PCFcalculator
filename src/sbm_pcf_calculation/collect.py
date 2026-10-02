@@ -207,7 +207,14 @@ n      composant, fournisseur, UniqueKey et GHG_perunit normalisées ;
 
 
 def build_ck_inbound_index(ck_inbound: pd.DataFrame) -> dict[str, pd.Series]:
-    """Indexe les lignes inbound CK par UniqueKey (une passe)."""
+    """Indexe les lignes inbound CK par UniqueKey (une passe).
+
+    Utilise la colonne UniqueKey (préservée par le cache parquet, contrairement
+    à l'index du DataFrame) — l'index tombe donc à juste titre après un reload.
+    """
+    key_col = config.FREIGHT_UNIQUEKEY_COL
+    if key_col in ck_inbound.columns:
+        return {str(row[key_col]): row for _, row in ck_inbound.iterrows()}
     return {str(key): row for key, row in ck_inbound.iterrows()}
 
 
@@ -418,6 +425,7 @@ def build_collecte(
     input_dir: str | Path,
     transformation: str | Path | None = None,
     fe_overrides: dict[str, dict] | None = None,
+    sources: dict | None = None,
 ) -> pd.DataFrame:
     """Construit le Fichier de collecte à partir des sources du dossier input.
 
@@ -426,13 +434,21 @@ def build_collecte(
     Si `fe_overrides` est fourni (matching ecoinvent validé), les composants
     sans FE reçoivent le FE proposé avant calcul du DQR, du GHG et du PCF.
     """
-    paths = resolve_inputs(input_dir)
+    if sources is not None:
+        ef_packaging = sources["ef_packaging"]
+        achats = sources["achats"]
+        bom = sources["bom"]
+        produits = sources["produits"]
+        freight_raw, ck_inbound = sources["freight_raw"], sources["ck_inbound"]
+        sample = sources["sample"]
+    else:
+        paths = resolve_inputs(input_dir)
 
-    ef_packaging = load_sheet(paths["material"], "CK_EF_Packaging", HEADER_EF_PACKAGING)
-    achats = load_sheet(paths["material"], "CK_MaterialPurchase", HEADER_MATERIAL_PURCHASE)
-    bom = load_sheet(paths["mb_bom"], SHEET_MB_BOM, HEADER_MB_BOM)
-    produits = load_sheet(paths["mb_products"], SHEET_MB_PRODUCTS, HEADER_MB_PRODUCTS)
-    freight_raw, ck_inbound = load_freight_tables(paths["freight"])
+        ef_packaging = load_sheet(paths["material"], "CK_EF_Packaging", HEADER_EF_PACKAGING)
+        achats = load_sheet(paths["material"], "CK_MaterialPurchase", HEADER_MATERIAL_PURCHASE)
+        bom = load_sheet(paths["mb_bom"], SHEET_MB_BOM, HEADER_MB_BOM)
+        produits = load_sheet(paths["mb_products"], SHEET_MB_PRODUCTS, HEADER_MB_PRODUCTS)
+        freight_raw, ck_inbound = load_freight_tables(paths["freight"])
 
     saisie = None
     if transformation is not None:
@@ -459,14 +475,15 @@ def build_collecte(
     bom_active = bom_active.sort_values(["ITMREF", "CPNITMREF", "BOMALT"])
     bom_active = bom_active.drop_duplicates(subset=["ITMREF", "CPNITMREF"], keep="first")
 
-    sample = pd.read_excel(paths["produits_lm"], sheet_name="Export")
-    sample.columns = [str(c).strip() for c in sample.columns]
-    sample = sample.rename(
-        columns={
-            "Num Reference fournisseur": "SKU",
-            "Designation article": "Designation",
-        }
-    )
+    if sources is None:
+        sample = pd.read_excel(paths["produits_lm"], sheet_name="Export")
+        sample.columns = [str(c).strip() for c in sample.columns]
+        sample = sample.rename(
+            columns={
+                "Num Reference fournisseur": "SKU",
+                "Designation article": "Designation",
+            }
+        )
     sample["SKU"] = sample["SKU"].map(_text)
     sample = sample.dropna(subset=["SKU"]).drop_duplicates(subset="SKU")
 

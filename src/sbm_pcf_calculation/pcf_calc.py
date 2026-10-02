@@ -27,10 +27,22 @@ def build_component_lines(session: PcfSession, transformation_path: str | Path |
     input_dir = session.metadata.get("input_dir")
     if input_dir is None:
         raise ValueError("No input_dir in session metadata: reload sources first.")
+    sources = {
+        "ef_packaging": session.materials_and_factors,
+        "achats": session.component_database,
+        "bom": session.bom,
+        "produits": session.product_database,
+        "freight_raw": session.freight_tables,
+        "ck_inbound": session.freight_consolidated,
+        "sample": session.products,
+    }
+    if any(value is None for value in sources.values()):
+        sources = None
     return build_collecte(
         input_dir,
         transformation=transformation_path,
         fe_overrides=session.ef_overrides,
+        sources=sources,
     )
 
 
