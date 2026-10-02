@@ -38,6 +38,25 @@ def build_component_lines(session: PcfSession, transformation_path: str | Path |
     }
     if any(value is None for value in sources.values()):
         sources = None
+    else:
+        sample = sources["sample"]
+        if "SKU" not in sample.columns:
+            sku_col = next(
+                (c for c in sample.columns
+                 if "sku" in str(c).lower() or "reference" in str(c).lower()),
+                None,
+            )
+            if sku_col is None:
+                sources = None
+            else:
+                sample = sample.rename(columns={sku_col: "SKU"})
+        if sources is not None and "Designation" not in sample.columns:
+            desc_col = next(
+                (c for c in sample.columns if "designation" in str(c).lower()), None)
+            sample = sample.copy()
+            sample["Designation"] = sample[desc_col] if desc_col else None
+        if sources is not None:
+            sources["sample"] = sample
     return build_collecte(
         input_dir,
         transformation=transformation_path,
