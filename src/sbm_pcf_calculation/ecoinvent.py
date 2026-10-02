@@ -150,21 +150,29 @@ def pick_dataset(base: pd.DataFrame, keywords: list[str], country: str | None,
 
 
 def missing_fe_components(collecte: pd.DataFrame) -> pd.DataFrame:
-    """Composants uniques sans FE, avec pays fournisseur."""
+    """Composants uniques sans FE, avec les champs de la spec MissingEF_Matching."""
     no_fe = collecte[collecte["RM EF Value"].isna() & collecte["Component SKU"].notna()].copy()
     no_fe["pays"] = no_fe["Supplier code"].map(supplier_country)
-    return (
-        no_fe.groupby("Component SKU")
-        .agg(
-            design=("Component Designation", "first"),
-            matiere=("Raw Material", "first"),
-            fournis=("Supplier Name", "first"),
-            pays=("pays", "first"),
-            sage=("Category Code", "first"),
-            cfdesc=("Category description", "first"),
-        )
-        .reset_index()
-    )
+    aggs = {
+        "design": ("Component Designation", "first"),
+        "matiere": ("Raw Material", "first"),
+        "fournis": ("Supplier Name", "first"),
+        "pays": ("pays", "first"),
+        "sage": ("Category Code", "first"),
+        "cfdesc": ("Category description", "first"),
+    }
+    optional = {
+        "code_fournis": ("Supplier code", "first"),
+        "pack": ("Pack unit box", "first"),
+        "recycle": ("Recycled %", "first"),
+        "carbon_cat": ("Carbon category", "first"),
+        "uvp": ("UVP description", "first"),
+        "matiere_cf": ("Raw Material - Carbon Footprint", "first"),
+    }
+    for key, spec in optional.items():
+        if spec[0] in no_fe.columns:
+            aggs[key] = spec
+    return no_fe.groupby("Component SKU").agg(**aggs).reset_index()
 
 
 def match_missing_fe(collecte: pd.DataFrame, lcia_base: pd.DataFrame) -> pd.DataFrame:

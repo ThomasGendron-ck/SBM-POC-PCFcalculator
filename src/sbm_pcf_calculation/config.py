@@ -293,6 +293,8 @@ BLOCK_HEADERS: list[tuple[str, list[str]]] = [
         "Supplier code",
         "Supplier Name",
         "Raw Material",
+        "Raw Material - Carbon Footprint",
+        "UVP description",
         "Recycled %",
         "Scrap Rate",
     ]),

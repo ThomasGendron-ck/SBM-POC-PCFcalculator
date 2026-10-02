@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .results_spec import MANDATORY_FIELDS, MISSING_EF_COLUMNS, PCF_COLUMNS
+from .results_spec import MANDATORY, MISSING_EF_COLUMNS, PCF_COLUMNS
 
 GHOUPING_PATTERN = re.compile(r"Group between '?(.*?)'? and '?(.*?)'?\s*$")
 
@@ -91,14 +91,18 @@ DEFAULT_VALUES: dict[str, object] = {
 }
 
 MISSING_EF_COLUMN_MAP: dict[str, str] = {
-    "Category Code": "Component Category Code",
-    "Category description": "Component Category description",
-    "Carbon category": "Component Carbon category",
-    "Pack unit box": "Component Pack unit box",
-    "Supplier code": "Component Supplier Code",
-    "Supplier Name": "Component Supplier Name",
+    "design": "Component Designation",
+    "sage": "Component Category Code",
+    "cfdesc": "Component Category description",
+    "carbon_cat": "Component Carbon category",
+    "pack": "Component Pack unit box",
+    "code_fournis": "Component Supplier Code",
+    "fournis": "Component Supplier Name",
     "pays": "Component Supplier Country",
-    "RM AutoMatch EF Unit": "RM AutoMatch EF Unit",
+    "matiere": "Raw Material (MB Product)",
+    "matiere_cf": "Raw Material - Carbon Footprint",
+    "uvp": "UVP description",
+    "recycle": "Recycled %",
 }
 
 MISSING_EF_FROM_MATCHING: dict[str, str] = {
@@ -150,13 +154,15 @@ def build_missing_ef_sheet(component_lines: pd.DataFrame,
     no_fe = component_lines[
         component_lines["RM EF Value"].isna()
         & component_lines["Component SKU"].notna()
-    ].copy()
+    ]
     if no_fe.empty:
         return pd.DataFrame(columns=[name for name, _ in MISSING_EF_COLUMNS])
     from .ecoinvent import missing_fe_components
 
     missing = missing_fe_components(component_lines)
     missing = missing.rename(columns=MISSING_EF_COLUMN_MAP)
+    if "Component Supplier Country" not in missing.columns:
+        missing["Component Supplier Country"] = None
     if matching is not None and not matching.empty:
         match_cols = matching.rename(columns=MISSING_EF_FROM_MATCHING)
         by_sku = match_cols.set_index("Component SKU")
@@ -182,29 +188,34 @@ def _column_index(columns: list[str], name: str) -> int:
         ) from exc
 
 
+HEADER_FILL = "E97132"
+HEADER_FONT_COLOR = "FFFFFF"
+MANDATORY_FILL = "13501B"
+PCF_TAB_FILL = "0B3041"
+
+
 def _style_sheet(ws, columns: list[tuple[str, str | None]],
-                 sheet_columns: list[str], groups: list[tuple[str, str]],
-                 group_prefix: str = "SBM_PCF") -> None:
+                 sheet_columns: list[str], groups: list[tuple[str, str]]) -> None:
     """Apply the v0.97 sheet layout: mandatory row, header, groups, freeze."""
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
-    header_fill = PatternFill("solid", fgColor="D9E1F2")
-    mandatory_fill = PatternFill("solid", fgColor="FFF2CC")
+    header_fill = PatternFill("solid", fgColor=HEADER_FILL)
+    mandatory_fill = PatternFill("solid", fgColor=MANDATORY_FILL)
 
-    # Row 1: mandatory marker for fields the user must fill.
+    # Row 1: exact "Mandatory field" value from the spec (column I).
     for idx, name in enumerate(sheet_columns, start=1):
-        cell = ws.cell(row=1, column=idx,
-                       value="Mandatory" if name in MANDATORY_FIELDS else None)
+        cell = ws.cell(row=1, column=idx, value=MANDATORY.get(name))
         cell.fill = mandatory_fill
-        cell.font = Font(bold=True, size=9)
+        cell.font = Font(bold=True, size=9, color=HEADER_FONT_COLOR)
         cell.alignment = Alignment(horizontal="center")
     # Row 2: header.
-    for idx, (name, fmt) in enumerate(columns, start=1):
+    for idx, (name, _fmt) in enumerate(columns, start=1):
         cell = ws.cell(row=2, column=idx, value=name)
         cell.fill = header_fill
-        cell.font = Font(bold=True)
+        cell.font = Font(bold=True, color=HEADER_FONT_COLOR)
         cell.alignment = Alignment(horizontal="center", wrap_text=True)
+    ws.row_dimensions[1].height = 20.0
     ws.row_dimensions[2].height = 45.0
     # Column groups (outline levels).
     group_level = 1
@@ -248,12 +259,32 @@ def write_pcf_results(output_path: str | Path,
     return output_path
 
 
+def write_ef_matching(output_path: str | Path,
+                      component_lines: pd.DataFrame,
+                      matching: pd.DataFrame) -> Path:
+    """Write the ef_matching.xlsx deliverable (MissingEF_Matching sheet,
+    same layout as the spec sheet of pcf_results.xlsx)."""
+    from openpyxl import Workbook
+
+    sheet = build_missing_ef_sheet(component_lines, matching)
+    output_path = Path(output_path)
+    workbook = Workbook()
+    ws = workbook.active
+    ws.title = "MissingEF_Matching"
+    _write_sheet_rows(ws, sheet, MISSING_EF_COLUMNS)
+    _style_sheet(ws, MISSING_EF_COLUMNS,
+                 [name for name, _ in MISSING_EF_COLUMNS], COLUMN_GROUPS_MISSING_EF)
+    workbook.save(output_path)
+    return output_path
+
+
 def _write_sheet_rows(ws, df: pd.DataFrame,
                      columns: list[tuple[str, str | None]]) -> None:
-    """Write the data rows with per-column number formats in one pass."""
+    """Write the data rows (from row 3) with per-column number formats."""
     values = df.values.tolist()
     for row_idx, row in enumerate(values, start=3):
-        ws.append(row)
+        for col_idx, value in enumerate(row, start=1):
+            ws.cell(row=row_idx, column=col_idx, value=value)
     for col_idx, (_name, fmt) in enumerate(columns, start=1):
         if not fmt:
             continue

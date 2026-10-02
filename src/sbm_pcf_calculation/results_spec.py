@@ -1,8 +1,9 @@
 """Column definitions of the pcf_results.xlsx output file (spec v0.97).
 
-Derived from the Spec_CalculationFile sheet of "POC Calculateur -
-Specifications - v0.97.xlsx". Each entry is (field name, Excel
-number format or None). Field order matches the spec order.
+Derived from the Spec_CalculationFile sheet of the "POC Calculateur -
+Specifications - v0.97.xlsx" file. Each entry is (field name, Excel
+number format or None). Field order matches the spec order. MANDATORY
+holds the exact "Mandatory field" value (column I) of the spec.
 """
 from __future__ import annotations
 
@@ -200,26 +201,26 @@ MISSING_EF_COLUMNS: list[tuple[str, str | None]] = [
     ("Transfo UserValidation Details", None),
 ]
 
-MANDATORY_FIELDS: list[str] = [
-    "UserValidation EF Yes/No",
-    "UserValidation EF Rationale",
-    "UserValidation EF Name",
-    "UserValidation EF Rationale",
-    "UserValidation EF Value",
-    "UserValidation EF Unit",
-    "UserValidation EF Geography",
-    "UserValidation EF Source",
-    "UserValidation EF PDS",
-    "UserValidation GEO DQR",
-    "UserValidation TECH DQR",
-    "UserValidation TEMP DQR",
-    "Transfo UserValidation Process Name",
-    "Transfo UserValidation Process EF Name",
-    "Transfo UserValidation Process EF Value",
-    "Transfo UserValidation Process EF Unit",
-    "Transfo UserValidation Process EF Source",
-    "Transfo UserValidation PDS value",
-    "Transfo UserValidation GEO DQR",
-    "Transfo UserValidation TECH DQR",
-    "Transfo UserValidation TEMP DQR",
-]
+# Exact "Mandatory field" value (spec column I) per field name.
+MANDATORY: dict[str, str] = {
+    "UserValidation EF Yes/No": "Yes",
+    "UserValidation EF Rationale": "Yes",
+    "UserValidation EF Name": "Yes if EF not approved",
+    "UserValidation EF Value": "Yes if EF not approved",
+    "UserValidation EF Unit": "Yes if EF not approved",
+    "UserValidation EF Geography": "Yes if EF not approved",
+    "UserValidation EF Source": "Yes if EF not approved",
+    "UserValidation EF PDS": "Yes if EF not approved",
+    "UserValidation GEO DQR": "Yes if EF not approved",
+    "UserValidation TECH DQR": "Yes if EF not approved",
+    "UserValidation TEMP DQR": "Yes if EF not approved",
+    "Transfo UserValidation Process Name": "Yes",
+    "Transfo UserValidation Process EF Name": "Yes",
+    "Transfo UserValidation Process EF Value": "Yes if EF not approved",
+    "Transfo UserValidation Process EF Unit": "Yes if EF not approved",
+    "Transfo UserValidation Process EF Source": "Yes if EF not approved",
+    "Transfo UserValidation PDS value": "Yes if EF not approved",
+    "Transfo UserValidation GEO DQR": "Yes if EF not approved",
+    "Transfo UserValidation TECH DQR": "Yes if EF not approved",
+    "Transfo UserValidation TEMP DQR": "Yes if EF not approved",
+}

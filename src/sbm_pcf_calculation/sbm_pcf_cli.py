@@ -107,7 +107,12 @@ def cmd_ef_match(args) -> int:
     n = int((matching["Statut"] == "MATCHÉ").sum()) if not matching.empty else 0
     print(f"Matched: {n}/{len(matching)}")
     out = Path(args.output or "ef_matching.xlsx")
-    matching.to_excel(out, index=False)
+    if session.component_results is not None:
+        from .results_writer import write_ef_matching
+
+        write_ef_matching(out, session.component_results, matching)
+    else:
+        matching.to_excel(out, index=False)
     validated = matching[matching["Statut"] == "MATCHÉ"].copy()
     validated["A valider (OUI/NON)"] = "OUI"
     from .EF_Matching import apply_validated_factors

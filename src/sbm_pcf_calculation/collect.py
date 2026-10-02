@@ -636,6 +636,12 @@ def build_collecte(
                     "Supplier code": code_fournisseur,
                     "Supplier Name": fournisseur,
                     "Raw Material": matiere,
+                    "Raw Material - Carbon Footprint": (
+                        _text(ck_row["RawMat_Hypothesis"])
+                        if ck_row is not None and "RawMat_Hypothesis" in ck_row
+                        else None
+                    ),
+                    "UVP description": _text(comp["ZUVP_DES"]) if comp is not None else None,
                     "Recycled %": recycle,
                     "Scrap Rate": None,
                     "Supplier PCF value": None,

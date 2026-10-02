@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 from openpyxl import load_workbook
 
-from sbm_pcf_calculation.results_spec import MANDATORY_FIELDS, MISSING_EF_COLUMNS, PCF_COLUMNS
+from sbm_pcf_calculation.results_spec import MANDATORY, MISSING_EF_COLUMNS, PCF_COLUMNS
 from sbm_pcf_calculation.results_writer import (
     build_missing_ef_sheet,
     build_pcf_sheet,
@@ -195,10 +195,10 @@ class TestWritePcfResults:
         header = [cell.value for cell in missing_ws[2]]
         assert header[:2] == ["Component SKU", "Component Designation"]
         mandatory = [cell.value for cell in missing_ws[1]]
-        mandatory_names = [
-            header[i] for i, value in enumerate(mandatory) if value == "Mandatory"
-        ]
-        assert mandatory_names == MANDATORY_FIELDS
+        expected = [MANDATORY.get(name) for name in header]
+        assert mandatory == expected
+        assert mandatory[header.index("UserValidation EF Yes/No")] == "Yes"
+        assert mandatory[header.index("UserValidation EF Name")] == "Yes if EF not approved"
 
     def test_number_formats(self, tmp_path, component_lines, product_results):
         out = tmp_path / "pcf_results.xlsx"
