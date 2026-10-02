@@ -3,24 +3,27 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pcf-extraction"
+name = "SBM-PCF-calculation"
 version = "0.2.0"
 description = "Extraction et analyse des composants SBM pour le calcul des facteurs d'émission (PCF)"
 requires-python = ">=3.10"
 dependencies = [
     "pandas>=2.0",
     "openpyxl>=3.1",
+    "pyarrow>=14.0",
+    "python-calamine>=0.2",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "weasyprint>=61.0",
 ]
 
 [project.scripts]
-pcf-extract = "pcf_extraction.cli:main"
-pcf-collecte = "pcf_extraction.cli:main_collecte"
-pcf-datashare = "pcf_extraction.datashare_cli:main_datashare"
+sbm-pcf-collecte = "sbm_pcf_calculation.cli:main_collecte"
+sbm-pcf-collection = "sbm_pcf_calculation.datashare_cli:main_datashare"
+sbm-pcf = "sbm_pcf_calculation.sbm_pcf_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

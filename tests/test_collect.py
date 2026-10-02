@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from pcf_extraction.collect import (
+from sbm_pcf_calculation.collect import (
     FLAG_PAS_DE_FE,
     compute_dqr,
 )
@@ -58,7 +58,7 @@ class TestSorhoy15:
 
     @pytest.fixture(scope="class")
     def collecte(self):
-        from pcf_extraction.collect import build_collecte
+        from sbm_pcf_calculation.collect import build_collecte
 
         df = build_collecte(INPUT_DIR)
         return df[df["Product SKU"] == "SORHOY15"].reset_index(drop=True)
@@ -106,7 +106,7 @@ class TestFreight:
 
     @pytest.fixture(scope="class")
     def collecte(self):
-        from pcf_extraction.collect import build_collecte
+        from sbm_pcf_calculation.collect import build_collecte
 
         return build_collecte(INPUT_DIR)
 
@@ -125,7 +125,7 @@ class TestFreight:
         assert (sub["Freight GHG"] >= 0).all()
 
     def test_flag_trajet_manquant(self, collecte):
-        from pcf_extraction.collect import FLAG_PAS_DE_TRAJET_FRET
+        from sbm_pcf_calculation.collect import FLAG_PAS_DE_TRAJET_FRET
 
         sans = collecte[collecte["Freight Route"].isna() & collecte["Component SKU"].notna()]
         if not sans.empty:
@@ -136,7 +136,7 @@ class TestTransformation:
     """Bloc Impact fabrication fournisseur : formule Transformation GHG (règles v0.7)."""
 
     def test_ghg_transformation_sans_saisie(self):
-        from pcf_extraction.collect import _compute_transformation_ghg
+        from sbm_pcf_calculation.collect import _compute_transformation_ghg
 
         df = pd.DataFrame(
             {
@@ -150,7 +150,7 @@ class TestTransformation:
         assert pd.isna(out["Transformation GHG"].iloc[1])
 
     def test_transformation_priorite_saisie(self, tmp_path):
-        from pcf_extraction.collect import _apply_transformation
+        from sbm_pcf_calculation.collect import _apply_transformation
 
         collecte = pd.DataFrame(
             {
@@ -189,7 +189,7 @@ class TestStyleCollecte:
     """Couleurs de blocs et groupements de colonnes (Plans > Grouper) dans le livrable."""
 
     def test_ordre_colonnes_v07(self):
-        from pcf_extraction import config
+        from sbm_pcf_calculation import config
         cols = [c for _, block in config.BLOCK_HEADERS for c in block]
         assert cols[2:6] == ["PCF Value", "PCF Unit", "DQR Product", "PDS Product"]
         assert cols.index("RM PDS Activity Data") > cols.index("Quantity")
@@ -199,12 +199,12 @@ class TestStyleCollecte:
         assert "Transformation EF" not in cols
 
     def test_layout_v07(self):
-        from pcf_extraction import config
+        from sbm_pcf_calculation import config
         assert config.COLLECTE_HEADER_ROW == 6
         assert config.COLLECTE_FREEZE_PANES == "C7"
 
     def test_marqueurs_grouping_v071(self):
-        from pcf_extraction import config
+        from sbm_pcf_calculation import config
         cols = [c for _, block in config.BLOCK_HEADERS for c in block]
         for marker in config.GROUPING_MARKER_COLUMNS:
             assert marker in cols, marker
@@ -212,27 +212,27 @@ class TestStyleCollecte:
         assert config.EXCEL_HEADER_MAP["Transformation Details (2)"] == "Transformation Details"
 
     def test_groupe_transformation_v071(self):
-        from pcf_extraction import config
+        from sbm_pcf_calculation import config
         cols = [c for _, block in config.BLOCK_HEADERS for c in block]
         first, last = ("Transformation Process Name", "Transformation Energy EF Source")
         assert cols.index(first) < cols.index(last)
 
     def test_layout_v072(self):
-        from pcf_extraction import config
+        from sbm_pcf_calculation import config
         assert config.GROUPING_MARKER_WIDTH == 9.43
         assert config.COLLECTE_HEADER_ROW_HEIGHT == 108.75
         assert config.COLLECTE_TOP_GROUP_ROWS == (1, 4)
         assert config.FLAG_FILL == "FFFFC000"
 
     def test_font_colors_v072(self):
-        from pcf_extraction import config
+        from sbm_pcf_calculation import config
         assert config.BLOCK_FONT_COLORS["Produit"] == "FFFFFFFF"
         assert config.BLOCK_FONT_COLORS["Composants"] == "FFFFFFFF"
         assert config.BLOCK_FONT_COLORS["Impact matière fournisseur"] == "FF000000"
         assert config.BLOCK_FONT_COLORS["Flag"] == "FF000000"
 
     def test_synthese_v072(self):
-        from pcf_extraction.report import build_synthese, SYNTHESE_COLUMNS
+        from sbm_pcf_calculation.report import build_synthese, SYNTHESE_COLUMNS
         import pandas as pd
         collecte = pd.DataFrame(
             {
@@ -263,14 +263,14 @@ class TestStyleCollecte:
         assert "Use - GHG Value" in syn.columns and "End of Life - GHG Value" in syn.columns
 
     def test_couleurs_v071(self):
-        from pcf_extraction import config
+        from sbm_pcf_calculation import config
         assert config.BLOCK_COLORS["Produit"] == "FF156082"
         assert config.BLOCK_COLORS["Produit PCF"] == "FF0A3041"
         assert config.BLOCK_COLORS["Composants"] == "FF13501B"
         assert config.BLOCK_COLORS["Impact Appro Transport"] == "FF6FC5E6"
 
     def test_formats_nombre(self):
-        from pcf_extraction import config
+        from sbm_pcf_calculation import config
         cols = [c for _, block in config.BLOCK_HEADERS for c in block]
         for col in config.NUMBER_FORMATS:
             assert col in cols, col
@@ -280,15 +280,15 @@ class TestStyleCollecte:
         assert config.NUMBER_FORMATS["RM PDS Activity Data"] == "0"
 
     def test_structure_blocs(self):
-        from pcf_extraction import config
+        from sbm_pcf_calculation import config
 
         cols = [c for _, block in config.BLOCK_HEADERS for c in block]
-        from pcf_extraction.collect import COLLECTE_COLUMNS
+        from sbm_pcf_calculation.collect import COLLECTE_COLUMNS
 
         assert cols == COLLECTE_COLUMNS
 
     def test_groupes_dans_limites(self):
-        from pcf_extraction import config
+        from sbm_pcf_calculation import config
 
         cols = [c for _, block in config.BLOCK_HEADERS for c in block]
         for first, last in config.COLUMN_GROUPS:
@@ -300,13 +300,13 @@ class TestV073:
     """v0.73 : Synthèse en 1er onglet, formats décimaux/pourcentages, réinjection des FE ecoinvent."""
 
     def test_synthese_header_layout(self):
-        from pcf_extraction import report
+        from sbm_pcf_calculation import report
         assert report.SYNTHESE_HEADER_HEIGHT == 60.0
 
     def test_synthese_formats_v073(self, tmp_path):
         import pandas as pd
-        from pcf_extraction.collect import COLLECTE_COLUMNS
-        from pcf_extraction.report import write_collecte_report
+        from sbm_pcf_calculation.collect import COLLECTE_COLUMNS
+        from sbm_pcf_calculation.report import write_collecte_report
 
         collecte = pd.DataFrame(
             {
@@ -354,7 +354,7 @@ class TestV073:
 
     def test_build_fe_overrides(self):
         import pandas as pd
-        from pcf_extraction.collect import build_fe_overrides
+        from sbm_pcf_calculation.collect import build_fe_overrides
 
         matching = pd.DataFrame(
             {
@@ -376,8 +376,8 @@ class TestV073:
 
     @requires_data
     def test_reinjection_fe_ecoinvent(self):
-        from pcf_extraction.collect import build_collecte, build_fe_overrides
-        from pcf_extraction.ecoinvent import load_lcia_gwp, match_missing_fe
+        from sbm_pcf_calculation.collect import build_collecte, build_fe_overrides
+        from sbm_pcf_calculation.ecoinvent import load_lcia_gwp, match_missing_fe
 
         lcia_files = list(INPUT_DIR.glob("Cut-off Cumulative LCIA*.xlsx"))
         if not lcia_files:
@@ -397,12 +397,12 @@ class TestV074:
     """v0.74 : périmètre BOM élargi (BOMALT sauf 2 et 9, USESTA_0 = 2) et taux de perte/rebuts."""
 
     def test_filtre_bom(self):
-        from pcf_extraction.collect import BOM_EXCLUDED_ALTERNATIVES, BOM_ACTIVE_STATUS
+        from sbm_pcf_calculation.collect import BOM_EXCLUDED_ALTERNATIVES, BOM_ACTIVE_STATUS
         assert BOM_EXCLUDED_ALTERNATIVES == (2, 9)
         assert BOM_ACTIVE_STATUS == 2
 
     def test_scrap_rate_dans_colonnes(self):
-        from pcf_extraction import config
+        from sbm_pcf_calculation import config
         cols = [c for _, block in config.BLOCK_HEADERS for c in block]
         assert "Scrap Rate" in cols
         assert config.NUMBER_FORMATS["Scrap Rate"] == "0.00000"
@@ -412,7 +412,7 @@ class TestV074:
     def test_scrap_rate_applique_au_ghg_transformation(self):
         import numpy as np
         import pandas as pd
-        from pcf_extraction.collect import _compute_transformation_ghg
+        from sbm_pcf_calculation.collect import _compute_transformation_ghg
 
         collecte = pd.DataFrame(
             {
@@ -428,7 +428,7 @@ class TestV074:
 
     @requires_data
     def test_perimetre_bom_elargi(self):
-        from pcf_extraction.collect import build_collecte
+        from sbm_pcf_calculation.collect import build_collecte
 
         collecte = build_collecte(INPUT_DIR)
         pcf = collecte.groupby("Product SKU")["PCF Value"].first()

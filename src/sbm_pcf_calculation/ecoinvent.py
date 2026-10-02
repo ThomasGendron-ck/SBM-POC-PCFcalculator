@@ -126,9 +126,21 @@ def _pick_geo(matches: pd.DataFrame, country: str | None) -> pd.Series | None:
     return None
 
 
-def pick_dataset(base: pd.DataFrame, keywords: list[str], country: str | None) -> pd.Series | None:
+def _keyword_matches(base: pd.DataFrame, kw: str,
+                    cache: dict[str, pd.DataFrame] | None = None) -> pd.DataFrame:
+    """Rows whose activity name matches a keyword (cached per run when provided)."""
+    if cache is not None and kw in cache:
+        return cache[kw]
+    matches = base[base["name"].str.contains(kw, case=False, na=False, regex=True)]
+    if cache is not None:
+        cache[kw] = matches
+    return matches
+
+
+def pick_dataset(base: pd.DataFrame, keywords: list[str], country: str | None,
+                 cache: dict[str, pd.DataFrame] | None = None) -> pd.Series | None:
     for kw in keywords:
-        matches = base[base["name"].str.contains(kw, case=False, na=False, regex=True)]
+        matches = _keyword_matches(base, kw, cache)
         if matches.empty:
             continue
         best = _pick_geo(matches, country)
@@ -158,6 +170,7 @@ def missing_fe_components(collecte: pd.DataFrame) -> pd.DataFrame:
 def match_missing_fe(collecte: pd.DataFrame, lcia_base: pd.DataFrame) -> pd.DataFrame:
     """Matche chaque composant sans FE avec un dataset ecoinvent."""
     comps = missing_fe_components(collecte)
+    keyword_cache: dict[str, pd.DataFrame] = {}
     rows = []
     for _, comp in comps.iterrows():
         text = re.sub(
@@ -168,7 +181,7 @@ def match_missing_fe(collecte: pd.DataFrame, lcia_base: pd.DataFrame) -> pd.Data
         matched, rule = None, None
         for pattern, keywords, comment in MATCH_RULES:
             if re.search(pattern, text):
-                matched = pick_dataset(lcia_base, keywords, comp["pays"])
+                matched = pick_dataset(lcia_base, keywords, comp["pays"], keyword_cache)
                 if matched is not None:
                     rule = comment
                     break

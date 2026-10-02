@@ -1,3 +1,62 @@
+# SBM PCF Calculation
+
+Outil de calcul des PCF (Product Carbon Footprint) des produits SBM à partir
+des fichiers Excel du Bilan Carbone (Masterbase, BOM, matières et facteurs
+d'émission, fret amont) — ici sur un extrait de références Leroy Merlin (LM).
+
+## Pipeline unifié `sbm-pcf`
+
+Chaque étape est appelable séparément. Par défaut les données proviennent de la
+session en cache (`--work-dir`) : rapide en développement. `--reload` recharge
+tous les fichiers Excel sources.
+
+```bash
+sbm-pcf load      --input ./input --work-dir ./pcf_workspace     # 1. charger les sources
+sbm-pcf collect   --work-dir ./pcf_workspace --output collection.xlsx   # 2a. fichier de collecte
+# ... fichier rempli par SBM / fournisseurs ...
+sbm-pcf activity  --work-dir ./pcf_workspace --collection collection_filled.xlsx  # 2b. données d'activité manquantes
+sbm-pcf ef-match  --work-dir ./pcf_workspace                     # 2c. matching FE manquants (ecoinvent)
+sbm-pcf compute   --work-dir ./pcf_workspace                     # 2d. calcul des PCF + flags HIGH/MEDIUM/LOW
+sbm-pcf report    --work-dir ./pcf_workspace --output PCF_LM.pdf [--selection produits.xlsx]  # 2e. rapport PDF
+```
+
+### Test de non-régression (`compute --check-baseline`)
+
+La baseline validée est versionée dans `baselines/pcf_results_baseline.csv`.
+
+```bash
+sbm-pcf compute --work-dir ./pcf_workspace --check-baseline baselines/pcf_results_baseline.csv
+sbm-pcf compute --work-dir ./pcf_workspace --check-baseline save   # réécrit la baseline (changement volontaire)
+```
+
+- Le check compare les résultats au CSV : nouveau/produit manquant, dérive de
+  valeur, changement de texte. Vide = OK.
+- En cas de dérive : rapport affiché sur stderr et **code retour 2**.
+- `'save'` réécrit `baselines/pcf_results_baseline.csv` avec les résultats
+  courants (à utiliser après un changement validé, jamais pour « faire passer »
+  un check).
+
+### Structure du package (`src/sbm_pcf_calculation/`)
+
+- `sources.py` — chargement des inputs (liste produits, Masterbase, BOM, matières
+  et FE, fret, LCIA ecoinvent) + `PcfSession` (conteneur de données)
+- `cache.py` — sauvegarde/rechargement de la session (parquet, sans relire les Excel)
+- `collection.py` / `datashare.py` + `prefill.py` — fichier de collecte LM (spec v0.95/0.96)
+- `activity.py` — évaluation des données d'activité manquantes (fichier rempli)
+- `EF_Matching.py` — matching des facteurs d'émission manquants avec ecoinvent
+- `pcf_calc.py` — calcul des PCF par produit, DQR/PDS, flags de qualité
+- `pdf_report.py` — rapport PDF (WeasyPrint, gabarit HTML/CSS modifiable :
+  `src/sbm_pcf_calculation/templates/pcf_report.html`) ; `load_pcf_selection()`
+  charge un fichier listant les PCF à générer (xlsx/csv)
+- `sbm_pcf_cli.py` — ligne de commande `sbm-pcf`
+
+### Commandes historiques (conservées)
+
+- `sbm-pcf-collecte` — fichier de collecte complet avec calcul PCF (v0.3–v0.74)
+- `sbm-pcf-collection` — génération du fichier de collecte LM (ex `pcf-datashare`)
+
+---
+
 # PCF Extraction — Extraction et analyse des composants SBM
 
 ## Génération v0.93 du fichier de collecte LM (pcf-datashare)
@@ -30,61 +89,6 @@ pcf-datashare \
   bordures) ; ordre des onglets UserGuide, Product, Component, DQR_Guide
 - Les données saisies du fichier d'entrée sont recopiées vers le nouveau
   layout (renommage `Transformation Energy Name` → `Transformation Energy Type`)
-
-Outil d'extraction et d'analyse des composants pour calculer les facteurs d'émission (PCF — Product Carbon Footprint) à partir des fichiers Excel SBM (Bilan Carbone FY24-25).
-
-Le pipeline produit des rapports détaillés pour prioriser les recherches de données manquantes :
-- **Produits** : référentiel des produits analysés
-- **Relations Produit-Composant** : nomenclature enrichie des émissions par phase
-- **Stats FE manquants** : taux de complétude par phase (Production, Usage, Fin de Vie, Fret amont)
-- **Composants uniques** : liste dédoublonnée avec contribution et nombre de produits concernés
-- **Priorités à investiguer** : composants triés par impact (FE manquants × nb de produits)
-
-## Structure du projet
-
-```
-pcf-extraction/
-├── input/                  # 5 fichiers Excel sources (non versionnés)
-├── data/
-│   ├── raw/                  # Anciens fichiers SBM (v0.2, non versionnés)
-│   ├── interim/              # Données intermédiaires
-│   └── output/               # Rapports générés (non versionnés)
-├── src/pcf_extraction/
-│   ├── __init__.py
-│   ├── cli.py                # Lignes de commande pcf-extract / pcf-collecte
-│   ├── collect.py            # Pipeline « Fichier de collecte » PCF (v0.3)
-│   ├── config.py             # Règles d'extraction et catégorisation SAGE
-│   ├── extract.py            # Pipeline d'extraction v0.2
-│   ├── io_sbm.py             # Lecture des fichiers SBM
-│   └── report.py             # Rapports et statistiques
-├── tests/
-│   ├── test_collect.py       # Règles DQR + non-régression SORHOY15
-│   └── test_report.py        # Tests unitaires
-├── docs/
-├── pyproject.toml
-└── README.md
-```
-
-## Installation
-
-```bash
-cd pcf-extraction
-python -m venv .venv
-source .venv/bin/activate   # Windows : .venv\Scripts\activate
-pip install -e ".[dev]"
-```
-
-## Utilisation
-
-```bash
-pcf-extract \
-  --material "data/raw/SBM_Material_Packaging.xlsx" \
-  --freight "data/raw/SBM_Freight.xlsx" \
-  --sample "data/raw/Echantillon - Produits à analyser.xlsx" \
-  --output "data/output/Extraction_Composants.xlsx"
-```
-
-L'argument `--sample` est optionnel : sans échantillon, le pipeline traite l'intégralité du référentiel.
 
 ## Génération du Fichier de collecte (règles v0.7)
 

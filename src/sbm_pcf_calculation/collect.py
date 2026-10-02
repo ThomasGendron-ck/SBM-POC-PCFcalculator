@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from . import config
-from .io_sbm import load_sheet
+from .io_sbm import load_sheet, load_sheet_columns
 
 HEADER_EF_PACKAGING = 4
 HEADER_MATERIAL_PURCHASE = 12
@@ -29,7 +29,7 @@ INPUT_PATTERNS = {
     "mb_bom": "Masterbase_BOM*.xlsx",
     "material": "*Material and Packaging*.xlsx",
     "freight": "*Freight*.xlsx",
-    "lcia": "Cut-off Cumulative LCIA*.xlsx",
+    "lcia": "*Cut-off Cumulative LCIA*.xlsx",
 }
 
 SHEET_MB_PRODUCTS = "MASTERBASE Products"
@@ -107,12 +107,16 @@ def compute_dqr(geography: str | None, source: str | None, has_ef: bool) -> dict
     }
 
 
-def _pick_ck_row(achats: pd.DataFrame, component_ref: str) -> pd.Series | None:
+def _pick_ck_row(achats: pd.DataFrame, component_ref: str,
+                 ck_index: dict[str, dict] | None = None) -> dict | None:
     """Sélectionne la ligne CK_MaterialPurchase de référence d'un composant.
 
     Priorité aux lignes avec un FE valide (> 0), puis au poids acheté le plus
-    élevé (fournisseur principal).
+    élevé (fournisseur principal). `ck_index` (précalculé via build_ck_index)
+    évite de re-scanner tout le tableau à chaque composant.
     """
+    if ck_index is not None:
+        return ck_index.get(str(component_ref))
     rows = achats[achats["PRODUCT"] == component_ref]
     if rows.empty:
         return None
@@ -121,13 +125,24 @@ def _pick_ck_row(achats: pd.DataFrame, component_ref: str) -> pd.Series | None:
     return candidates.sort_values("Weight_KGTotal", ascending=False, na_position="last").iloc[0]
 
 
-def _lookup_ef_packaging(materiaux: pd.DataFrame, matiere: str, description: str | None) -> pd.Series | None:
+def build_ef_packaging_index(materiaux: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """Indexe les FE packaging par matière (une passe)."""
+    return {str(matter): rows for matter, rows in materiaux.groupby("RawMat_SubFamily")}
+
+
+def _lookup_ef_packaging(materiaux: pd.DataFrame, matiere: str, description: str | None,
+                         packaging_index: dict[str, pd.DataFrame] | None = None) -> pd.Series | None:
     """Cherche le FE packaging dans CK_EF_Packaging par matière + description."""
     if not matiere:
         return None
-    exact = materiaux[materiaux["RawMat_SubFamily"] == matiere]
-    if exact.empty:
-        return None
+    if packaging_index is not None:
+        exact = packaging_index.get(str(matiere))
+        if exact is None or exact.empty:
+            return None
+    else:
+        exact = materiaux[materiaux["RawMat_SubFamily"] == matiere]
+        if exact.empty:
+            return None
     if description:
         by_desc = exact[exact["CATEGORIE DESCRIPTION"] == description]
         if not by_desc.empty:
@@ -145,13 +160,19 @@ n      composant, fournisseur, UniqueKey et GHG_perunit normalisées ;
     """
     raw: dict[str, pd.DataFrame] = {}
     for flux, spec in config.FREIGHT_SHEETS.items():
-        df = load_sheet(freight_path, spec["sheet"], spec["header_row"])
-        df = df[[
+        needed = [
             spec["component_col"],
             spec["supplier_col"],
             config.FREIGHT_UNIQUEKEY_COL,
             config.FREIGHT_GHG_PERUNIT_COL,
-        ]].copy()
+        ]
+        df = load_sheet_columns(freight_path, spec["sheet"], spec["header_row"], needed)
+        missing = [c for c in needed if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"Colonnes fret introuvables dans l'onglet {spec['sheet']} : {missing}. "
+                f"Colonnes disponibles : {list(df.columns)}"
+            )
         df.columns = ["component", "supplier", "uniquekey", "ghg_perunit"]
         for col in ("component", "supplier", "uniquekey"):
             df[col] = df[col].map(_text)
@@ -160,7 +181,13 @@ n      composant, fournisseur, UniqueKey et GHG_perunit normalisées ;
         df["ghg_perunit"] = df.groupby("uniquekey")["ghg_perunit"].transform("mean")
         raw[flux] = df
 
-    ck = load_sheet(freight_path, config.FREIGHT_CK_SHEET, config.FREIGHT_CK_HEADER_ROW)
+    ck_needed = [
+        config.FREIGHT_FRET_TYPE_COL,
+        config.FREIGHT_UNIQUEKEY_COL,
+        config.FREIGHT_ADDRESSKEY_COL,
+        config.FREIGHT_MODE_COL,
+    ]
+    ck = load_sheet_columns(freight_path, config.FREIGHT_CK_SHEET, config.FREIGHT_CK_HEADER_ROW, ck_needed)
     ck = ck[ck[config.FREIGHT_FRET_TYPE_COL].fillna("").str.startswith(config.FREIGHT_FRET_TYPE_PREFIX)].copy()
     ck[config.FREIGHT_FRET_TYPE_COL] = (
         ck[config.FREIGHT_FRET_TYPE_COL]
@@ -179,11 +206,25 @@ n      composant, fournisseur, UniqueKey et GHG_perunit normalisées ;
     return raw, ck_dedup
 
 
+def build_ck_inbound_index(ck_inbound: pd.DataFrame) -> dict[str, pd.Series]:
+    """Indexe les lignes inbound CK par UniqueKey (une passe).
+
+    Utilise la colonne UniqueKey (préservée par le cache parquet, contrairement
+    à l'index du DataFrame) — l'index tombe donc à juste titre après un reload.
+    """
+    key_col = config.FREIGHT_UNIQUEKEY_COL
+    if key_col in ck_inbound.columns:
+        return {str(row[key_col]): row for _, row in ck_inbound.iterrows()}
+    return {str(key): row for key, row in ck_inbound.iterrows()}
+
+
 def _lookup_freight(
     raw: dict[str, pd.DataFrame],
     ck_inbound: pd.DataFrame,
     component_ref: str | None,
     supplier_code: str | None,
+    freight_index: dict[str, list[dict]] | None = None,
+    ck_inbound_index: dict[str, pd.Series] | None = None,
 ) -> dict:
     """Rattache le trajet fret d'un composant : raw (composant+fournisseur) -> UniqueKey -> CK.
 
@@ -193,8 +234,14 @@ def _lookup_freight(
     """
     if not component_ref:
         return {}
-    for flux, df in raw.items():
-        rows = df[df["component"] == component_ref]
+    entries = (
+        freight_index.get(str(component_ref), [])
+        if freight_index is not None
+        else [{"flux": flux, "rows": df[df["component"] == component_ref]} for flux, df in raw.items()]
+    )
+    for entry in entries:
+        flux = entry["flux"]
+        rows = entry["rows"]
         if supplier_code:
             by_supplier = rows[rows["supplier"] == supplier_code]
             if not by_supplier.empty:
@@ -202,10 +249,15 @@ def _lookup_freight(
         if rows.empty:
             continue
         row = rows.iloc[0]
-        ck_row = ck_inbound.loc[ck_inbound.index == row["uniquekey"]]
-        if ck_row.empty:
-            continue
-        ck_row = ck_row.iloc[0]
+        if ck_inbound_index is not None:
+            ck_row = ck_inbound_index.get(str(row["uniquekey"]))
+            if ck_row is None:
+                continue
+        else:
+            ck_rows = ck_inbound.loc[ck_inbound.index == row["uniquekey"]]
+            if ck_rows.empty:
+                continue
+            ck_row = ck_rows.iloc[0]
         return {
             "Freight Route": ck_row[config.FREIGHT_ADDRESSKEY_COL],
             "Freight Transportation Mode": ck_row[config.FREIGHT_MODE_COL],
@@ -327,10 +379,53 @@ def build_fe_overrides(matching: pd.DataFrame) -> dict[str, dict]:
     return overrides
 
 
+def agg_freight(df: pd.DataFrame, id_col: str, weight_col: str, ghg_col: str) -> pd.DataFrame:
+    """Agrège les lignes d'achat fret par article.
+
+    GHG_perunit est un facteur kgCO2e/kg : l'émission totale par ligne = facteur * poids.
+    On somme ensuite par article pour obtenir l'émission fret totale du composant (kgCO2e),
+    et on garde aussi le poids total transporté.
+    """
+    df = df.copy()
+    df[id_col] = df[id_col].astype(str).str.strip()
+    for col in (weight_col, ghg_col):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["emission_line"] = df[ghg_col] * df[weight_col]
+    grouped = df.groupby(id_col, dropna=False).agg(
+        poids_total=(weight_col, "sum"),
+        emission_totale=("emission_line", "sum"),
+        nb_lignes_achat=(id_col, "size"),
+    ).reset_index()
+    return grouped
+
+
+def build_ck_index(achats: pd.DataFrame) -> dict[str, dict]:
+    """Indexe la meilleure ligne CK_MaterialPurchase par composant (une passe)."""
+    ordered = achats.sort_values("Weight_KGTotal", ascending=False, na_position="last")
+    index: dict[str, dict] = {}
+    for component_ref, rows in ordered.groupby("PRODUCT"):
+        with_ef = rows[rows["Prod_EF_Value"].fillna(0) > 0]
+        candidates = with_ef if not with_ef.empty else rows
+        index[str(component_ref)] = candidates.iloc[0].to_dict()
+    return index
+
+
+def build_freight_index(raw: dict[str, pd.DataFrame]) -> dict[str, list[dict]]:
+    """Indexe les trajets fret par composant, flux par flux (une passe)."""
+    index: dict[str, list[dict]] = {}
+    for flux, df in raw.items():
+        for component_ref, rows in df.groupby("component"):
+            index.setdefault(str(component_ref), []).append(
+                {"flux": flux, "rows": rows}
+            )
+    return index
+
+
 def build_collecte(
     input_dir: str | Path,
     transformation: str | Path | None = None,
     fe_overrides: dict[str, dict] | None = None,
+    sources: dict | None = None,
 ) -> pd.DataFrame:
     """Construit le Fichier de collecte à partir des sources du dossier input.
 
@@ -339,13 +434,21 @@ def build_collecte(
     Si `fe_overrides` est fourni (matching ecoinvent validé), les composants
     sans FE reçoivent le FE proposé avant calcul du DQR, du GHG et du PCF.
     """
-    paths = resolve_inputs(input_dir)
+    if sources is not None:
+        ef_packaging = sources["ef_packaging"]
+        achats = sources["achats"]
+        bom = sources["bom"]
+        produits = sources["produits"]
+        freight_raw, ck_inbound = sources["freight_raw"], sources["ck_inbound"]
+        sample = sources["sample"]
+    else:
+        paths = resolve_inputs(input_dir)
 
-    ef_packaging = load_sheet(paths["material"], "CK_EF_Packaging", HEADER_EF_PACKAGING)
-    achats = load_sheet(paths["material"], "CK_MaterialPurchase", HEADER_MATERIAL_PURCHASE)
-    bom = load_sheet(paths["mb_bom"], SHEET_MB_BOM, HEADER_MB_BOM)
-    produits = load_sheet(paths["mb_products"], SHEET_MB_PRODUCTS, HEADER_MB_PRODUCTS)
-    freight_raw, ck_inbound = load_freight_tables(paths["freight"])
+        ef_packaging = load_sheet(paths["material"], "CK_EF_Packaging", HEADER_EF_PACKAGING)
+        achats = load_sheet(paths["material"], "CK_MaterialPurchase", HEADER_MATERIAL_PURCHASE)
+        bom = load_sheet(paths["mb_bom"], SHEET_MB_BOM, HEADER_MB_BOM)
+        produits = load_sheet(paths["mb_products"], SHEET_MB_PRODUCTS, HEADER_MB_PRODUCTS)
+        freight_raw, ck_inbound = load_freight_tables(paths["freight"])
 
     saisie = None
     if transformation is not None:
@@ -372,23 +475,29 @@ def build_collecte(
     bom_active = bom_active.sort_values(["ITMREF", "CPNITMREF", "BOMALT"])
     bom_active = bom_active.drop_duplicates(subset=["ITMREF", "CPNITMREF"], keep="first")
 
-    sample = pd.read_excel(paths["produits_lm"], sheet_name="Export")
-    sample.columns = [str(c).strip() for c in sample.columns]
-    sample = sample.rename(
-        columns={
-            "Num Reference fournisseur": "SKU",
-            "Designation article": "Designation",
-        }
-    )
+    if sources is None:
+        sample = pd.read_excel(paths["produits_lm"], sheet_name="Export")
+        sample.columns = [str(c).strip() for c in sample.columns]
+        sample = sample.rename(
+            columns={
+                "Num Reference fournisseur": "SKU",
+                "Designation article": "Designation",
+            }
+        )
     sample["SKU"] = sample["SKU"].map(_text)
     sample = sample.dropna(subset=["SKU"]).drop_duplicates(subset="SKU")
 
+    ck_index = build_ck_index(achats)
+    freight_index = build_freight_index(freight_raw)
+    ck_inbound_index = build_ck_inbound_index(ck_inbound)
+    packaging_index = build_ef_packaging_index(ef_packaging)
+    produits_records: dict[str, dict] = produits.to_dict("index")
     rows_out: list[dict] = []
     for _, lm in sample.iterrows():
         sku = _text(lm["SKU"])
         flags_produit: list[str] = []
 
-        prod = produits.loc[sku] if sku in produits.index else None
+        prod = produits_records.get(sku)
         if prod is None:
             flags_produit.append(FLAG_PRODUIT_INTROUVABLE)
 
@@ -419,7 +528,7 @@ def build_collecte(
             continue
 
         comp_rows: list[dict] = []
-        for _, bom_row in bom_prod.iterrows():
+        for bom_row in bom_prod.to_dict("records"):
             row = dict(base_produit)
             flags = list(flags_produit)
 
@@ -428,11 +537,11 @@ def build_collecte(
                 flags.append(FLAG_QTE_NULLE)
 
             comp_ref = _text(bom_row["CPNITMREF"])
-            comp = produits.loc[comp_ref] if comp_ref in produits.index else None
+            comp = produits_records.get(comp_ref)
             if comp is None:
                 flags.append(FLAG_PRODUIT_INTROUVABLE)
 
-            ck_row = _pick_ck_row(achats, comp_ref)
+            ck_row = _pick_ck_row(achats, comp_ref, ck_index)
 
             item_weight = _num(comp["Item weight"]) if comp is not None else np.nan
             gross_weight = _num(comp["GROSS_WEIGHT0"]) if comp is not None else np.nan
@@ -474,7 +583,7 @@ def build_collecte(
                 fe_src = _text(ck_row["Prod_EF_Source"])
                 fe_geo = _text(ck_row["Prod_EF_Geography"])
             else:
-                ef_pack = _lookup_ef_packaging(ef_packaging, matiere, desc_comp) if cf_cat == "PACKAGING" else None
+                ef_pack = _lookup_ef_packaging(ef_packaging, matiere, desc_comp, packaging_index) if cf_cat == "PACKAGING" else None
                 if ef_pack is not None:
                     if recycle > 0 and pd.notna(ef_pack["Recycled_EF_Value"]):
                         fe_nom = _text(ef_pack["Recycled1_EF_Name"]) or f"FE calculé par CK pour {matiere} recyclé"
@@ -498,7 +607,7 @@ def build_collecte(
             if not has_ef:
                 flags.append(FLAG_PAS_DE_FE)
 
-            freight_info = _lookup_freight(freight_raw, ck_inbound, comp_ref, code_fournisseur)
+            freight_info = _lookup_freight(freight_raw, ck_inbound, comp_ref, code_fournisseur, freight_index, ck_inbound_index)
             if not freight_info:
                 flags.append(FLAG_PAS_DE_TRAJET_FRET)
 

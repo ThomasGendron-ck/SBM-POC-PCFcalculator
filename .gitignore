@@ -27,3 +27,5 @@ Thumbs.db
 .pytest_cache/
 .coverage
 output/
+
+# Baselines de non-régression : les résultats validés SONT versionnés

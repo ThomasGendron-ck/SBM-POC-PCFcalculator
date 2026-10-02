@@ -1,50 +1,12 @@
-"""Ligne de commande : pcf-extract."""
-
+"""Ligne de commande : pcf-collecte."""
 import argparse
 import sys
 from pathlib import Path
 
 from .collect import build_collecte, build_fe_overrides, resolve_inputs
 from .ecoinvent import load_lcia_gwp, match_missing_fe
-from .extract import extract
-from .report import write_collecte_report, write_report
+from .report import write_collecte_report
 from .saisie import write_saisie_transformation
-
-
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="pcf-extract",
-        description="Extraction des composants SBM pour le calcul des facteurs d'émission (PCF)",
-    )
-    parser.add_argument("--material", required=True, help="Chemin du fichier SBM Material and Packaging (.xlsx)")
-    parser.add_argument("--freight", required=True, help="Chemin du fichier SBM Freight (.xlsx)")
-    parser.add_argument("--sample", default=None, help="Chemin du fichier Echantillon - Produits à analyser (.xlsx)")
-    parser.add_argument("--output", required=True, help="Chemin du classeur de sortie (.xlsx)")
-    args = parser.parse_args(argv)
-
-    for label, path in [("material", args.material), ("freight", args.freight)] + ([("sample", args.sample)] if args.sample else []):
-        if not Path(path).is_file():
-            print(f"Erreur : fichier {label} introuvable : {path}", file=sys.stderr)
-            return 1
-
-    print("Chargement des données source...")
-    tables = extract(args.material, args.freight, args.sample)
-
-    print(f"Produits extraits : {len(tables['produits'])}")
-    print(f"Relations produit-composant : {len(tables['relations'])}")
-    print(f"Composants uniques : {tables['relations']['ID Unique Composant'].nunique()}")
-
-    output = Path(args.output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    print(f"Écriture du rapport : {output}")
-    write_report(tables, str(output))
-    print("Terminé.")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-
 
 def main_collecte(argv=None) -> int:
     parser = argparse.ArgumentParser(
