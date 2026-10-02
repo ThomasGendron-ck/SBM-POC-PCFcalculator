@@ -39,6 +39,7 @@ class PcfSession:
     ef_overrides: dict | None = None
     component_results: pd.DataFrame | None = None
     product_results: pd.DataFrame | None = None
+    ef_matching: pd.DataFrame | None = None
     metadata: dict = field(default_factory=dict)
 
 

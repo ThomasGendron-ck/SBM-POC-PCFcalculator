@@ -113,6 +113,7 @@ def cmd_ef_match(args) -> int:
     from .EF_Matching import apply_validated_factors
 
     apply_validated_factors(session, validated)
+    session.ef_matching = matching
     from .cache import save_session
 
     session.metadata["work_dir"] = args.work_dir
@@ -133,7 +134,9 @@ def cmd_compute(args) -> int:
     if pcf is not None:
         print(f"Products with a PCF value: {int(pcf.notna().sum())}")
     out = Path(args.output or "pcf_results.xlsx")
-    results.to_excel(out, index=False)
+    from .results_writer import write_pcf_results
+
+    write_pcf_results(out, session.component_results, results, session.ef_matching)
     print(f"Results written: {out}")
     if args.check_baseline:
         from .regression import check_regression, save_baseline
