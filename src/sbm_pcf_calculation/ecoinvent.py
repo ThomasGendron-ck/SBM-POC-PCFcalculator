@@ -168,8 +168,16 @@ def missing_fe_components(collecte: pd.DataFrame) -> pd.DataFrame:
 
 
 def match_missing_fe(collecte: pd.DataFrame, lcia_base: pd.DataFrame) -> pd.DataFrame:
-    """Matche chaque composant sans FE avec un dataset ecoinvent."""
-    comps = missing_fe_components(collecte)
+    """Matche chaque composant sans FE avec un dataset ecoinvent.
+
+    Accepte soit la collecte brute (lignes par produit x composant), soit
+    la liste de composants uniques déjà produite par missing_fe_components
+    (session.ef_matching / identify_missing_factors).
+    """
+    if "design" in collecte.columns and "RM EF Value" not in collecte.columns:
+        comps = collecte
+    else:
+        comps = missing_fe_components(collecte)
     keyword_cache: dict[str, pd.DataFrame] = {}
     rows = []
     for _, comp in comps.iterrows():
