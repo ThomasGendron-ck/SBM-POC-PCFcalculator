@@ -127,9 +127,6 @@ def load_all_sources(
         session.product_database = _timed(
             "product database",
             lambda: load_product_database(resolved["material"], full_product_extract))
-    else:
-        session.product_database = _timed(
-            "product database", lambda: load_product_database(material_xls))
     session.component_database = _timed(
         "component database", lambda: load_component_database(material_xls))
     session.materials_and_factors = _timed(
