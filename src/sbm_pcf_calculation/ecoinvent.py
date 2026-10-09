@@ -191,8 +191,17 @@ def match_transfo_process(lcia_base: pd.DataFrame, text: str, country: str | Non
 
 
 def missing_fe_components(collecte: pd.DataFrame) -> pd.DataFrame:
-    """Composants uniques sans FE, avec les champs de la spec MissingEF_Matching."""
-    no_fe = collecte[collecte["RM EF Value"].isna() & collecte["Component SKU"].notna()].copy()
+    """Composants uniques sans FE ou automatchés ecoinvent (vue « à valider
+    par l'expert » : les composants dont le FE vient d'un override ecoinvent
+    restent dans la liste pour validation), avec les champs de la spec
+    MissingEF_Matching."""
+    if "RM EF Source" in collecte.columns:
+        automatched = collecte["RM EF Source"].astype(str).str.startswith("EcoInvent")
+    else:
+        automatched = pd.Series(False, index=collecte.index)
+    no_fe = collecte[
+        (collecte["RM EF Value"].isna() | automatched) & collecte["Component SKU"].notna()
+    ].copy()
     no_fe["pays"] = no_fe["Supplier code"].map(supplier_country)
     aggs = {
         "design": ("Component Designation", "first"),

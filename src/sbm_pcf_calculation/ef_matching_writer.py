@@ -354,8 +354,17 @@ def _sku_variants(sku: str) -> list[str]:
 
 def build_ef_matching_rows(collecte: pd.DataFrame, matching: pd.DataFrame | None,
                           lcia_base=None, component_database=None, product_database=None) -> list[dict]:
-    """Une ligne par composant sans FE, pré-remplie depuis la collecte et le matching ecoinvent."""
-    no_fe = collecte[collecte["RM EF Value"].isna() & collecte["Component SKU"].notna()].copy()
+    """Une ligne par composant sans FE ou automatché ecoinvent (vue « à valider
+    par l'expert » : les composants dont le FE vient d'un override ecoinvent
+    restent listés avec leur bloc RM AutoMatch pré-rempli), pré-remplie depuis la
+    collecte, les sources de session et le matching ecoinvent."""
+    if "RM EF Source" in collecte.columns:
+        automatched = collecte["RM EF Source"].astype(str).str.startswith("EcoInvent")
+    else:
+        automatched = pd.Series(False, index=collecte.index)
+    no_fe = collecte[
+        (collecte["RM EF Value"].isna() | automatched) & collecte["Component SKU"].notna()
+    ].copy()
     if no_fe.empty:
         return []
     match_by_sku: dict[str, pd.Series] = {}
