@@ -213,12 +213,16 @@ EF_MATCHING_COLUMNS: list[tuple[str, str]] = [
 ]
 
 # Groupings Plan : (première, dernière) colonne du groupe, bornes inclusives.
+# Bornes exactes de la spec v0.98 (colonne J du bloc MissingEF_Matching) :
+# Component Details = 'Component Category Code' -> 'Component Pack Unit Box',
+# AutoMatch Details = 'AutoMatch EF Name' -> 'RM AutoMatch DQR value', etc.
 GROUPING_RANGES = [
+    ("Component Category Code", "Component Pack Unit box"),
     ("UVP description", "Recycled %"),
-    ("RM AutoMatch EF Name", "RM AutoMatch TEMP DQR"),
-    ("Transfo AutoMatch Process Name", "Transfo AutoMatch TEMP DQR"),
-    ("RM UserValidation EF Yes/No", "RM UserValidation TEMP DQR"),
-    ("Transfo UserValidation Process Name", "Transfo UserValidation TEMP DQR"),
+    ("RM AutoMatch EF Name", "RM AutoMatch DQR value"),
+    ("Transfo AutoMatch Process Name", "Transfo AutoMatch DQR value"),
+    ("RM UserValidation EF Yes/No", "RM UserValidation DQR value"),
+    ("Transfo UserValidation Process Name", "Transfo UserValidation DQR value"),
 ]
 
 NUMBER_FORMATS = {
