@@ -158,6 +158,39 @@ def cmd_ef_match(args) -> int:
     return 0
 
 
+def cmd_ef_validate(args) -> int:
+    """Relit le fichier EF Matching validé par l'expert ACV et injecte les FE
+    validés dans la session (priorité expert > automatch) pour le calcul."""
+    session = _load_session(args)
+    from .ef_matching_writer import read_validated_ef_matching, build_validated_overrides
+
+    validated = read_validated_ef_matching(args.input)
+    overrides = build_validated_overrides(validated)
+    n_valid = int((validated["Decision"] == "VALIDÉ").sum())
+    n_reject = int((validated["Decision"] == "REFUSÉ").sum())
+    n_wait = int((validated["Decision"] == "EN ATTENTE").sum())
+    print(f"Fichier relu : {len(validated)} composants "
+          f"({n_valid} validés, {n_reject} refusés, {n_wait} en attente)")
+    n_expert = sum(1 for o in overrides.values() if "expert ACV" in str(o["source"]))
+    print(f"FE injectés dans la session : {len(overrides)} "
+          f"(dont {n_expert} FE expert personnalisés)")
+    if n_reject:
+        rejected_no_ef = validated[
+            (validated["Decision"] == "REFUSÉ") & validated["EF Value"].isna()
+        ]
+        if not rejected_no_ef.empty:
+            print("Attention : composants refusés sans FE expert fourni (pas d'override appliqué) :",
+                  file=sys.stderr)
+            print(rejected_no_ef["Component SKU"].to_string(index=False), file=sys.stderr)
+    session.ef_overrides = overrides or None
+    from .cache import save_session
+
+    session.metadata["work_dir"] = args.work_dir
+    save_session(session, args.work_dir)
+    print("Session mise à jour : lancez 'sbm-pcf compute' pour recalculer avec les FE validés.")
+    return 0
+
+
 def cmd_compute(args) -> int:
     session = _load_session(args)
     session.metadata["work_dir"] = args.work_dir
@@ -249,6 +282,15 @@ def main(argv=None) -> int:
     ef_match.add_argument("--output", default=None, help="Matching output (.xlsx)")
     _add_global_options(ef_match)
     ef_match.set_defaults(func=cmd_ef_match)
+
+    ef_validate = sub.add_parser(
+        "ef-validate",
+        help="Import the expert-validated EF matching file into the session "
+             "(expert EF > automatch) before the final computation",
+    )
+    ef_validate.add_argument("--input", required=True, help="Validated EF matching workbook (.xlsx)")
+    _add_global_options(ef_validate)
+    ef_validate.set_defaults(func=cmd_ef_validate)
 
     compute = sub.add_parser("compute", help="Compute PCF per product with quality flags")
     compute.add_argument("--transformation", default=None, help="Filled transformation input file")

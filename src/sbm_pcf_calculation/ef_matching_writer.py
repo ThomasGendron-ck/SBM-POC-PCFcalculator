@@ -319,6 +319,79 @@ def _defaults(row: int) -> dict[str, object]:
     }
 
 
+def read_validated_ef_matching(path: str | Path) -> pd.DataFrame:
+    """Relit le fichier EF Matching rempli par l'expert ACV.
+
+    Retourne un DataFrame une ligne par composant avec les colonnes :
+    Component SKU, decision (VALIDÉ / REFUSÉ / en attente), et le FE expert
+    (RM UserValidation EF Name/Value/Unit/Geography/Source) prioritaire sur
+    l'automatch.
+    """
+    df = pd.read_excel(path, sheet_name=EF_MATCHING_SHEET, header=HEADER_ROW - 1)
+    df.columns = [str(c).strip() for c in df.columns]
+    if "Component SKU" not in df.columns:
+        raise ValueError(f"Colonne 'Component SKU' introuvable dans {path}")
+    df = df[df["Component SKU"].notna()]
+    df["Component SKU"] = df["Component SKU"].astype(str).str.strip()
+    yes_no = df.get("RM UserValidation EF Yes/No")
+    decision = yes_no.astype(str).str.strip().str.upper() if yes_no is not None else None
+    validated = decision == "YES"
+    rejected = decision == "NO"
+    expert_value = pd.to_numeric(df.get("RM UserValidation EF Value"), errors="coerce")
+    expert_name = df.get("RM UserValidation EF Name")
+    if expert_name is None:
+        expert_name = pd.Series(None, index=df.index)
+    expert_name = expert_name.where(
+        expert_name.notna() & (expert_name.astype(str).str.strip() != "")
+    )
+    result = pd.DataFrame(
+        {
+            "Component SKU": df["Component SKU"],
+            "Decision": ["VALIDÉ" if v else ("REFUSÉ" if r else "EN ATTENTE") for v, r in zip(validated, rejected)],
+            "EF Name": expert_name,
+            "EF Value": expert_value,
+            "EF Unit": df.get("RM UserValidation EF Unit"),
+            "EF Geography": df.get("RM UserValidation EF Geography"),
+            "EF Source": df.get("RM UserValidation EF Source"),
+            "AutoMatch EF Name": df.get("RM AutoMatch EF Name"),
+            "AutoMatch EF Value": pd.to_numeric(df.get("RM AutoMatch EF Value"), errors="coerce"),
+        }
+    )
+    return result
+
+
+def build_validated_overrides(validated: pd.DataFrame) -> dict[str, dict]:
+    """Convertit le fichier EF Matching relu en ef_overrides pour le calcul.
+
+    Priorité : FE expert (UserValidation, si présent) > automatch (AutoMatch).
+    Les composants REFUSÉS sans FE expert ne reçoivent pas d'override
+    (l'expert doit fournir une valeur).
+    """
+    overrides: dict[str, dict] = {}
+    for _, r in validated.iterrows():
+        if r["Decision"] == "EN ATTENTE":
+            continue
+        expert_val = pd.to_numeric(r["EF Value"], errors="coerce")
+        expert_name = r["EF Name"]
+        if pd.notna(expert_val) and pd.notna(expert_name) and str(expert_name).strip() not in ("", "nan"):
+            overrides[str(r["Component SKU"])] = {
+                "name": str(expert_name),
+                "value": float(expert_val),
+                "unit": str(r["EF Unit"]) if pd.notna(r["EF Unit"]) else "kgCO2e/kg",
+                "source": str(r["EF Source"]) if pd.notna(r["EF Source"]) else "EcoInvent 3.12 cut-off (validé expert ACV)",
+                "geo": str(r["EF Geography"]) if pd.notna(r["EF Geography"]) else None,
+            }
+        elif r["Decision"] == "VALIDÉ" and pd.notna(r["AutoMatch EF Value"]):
+            overrides[str(r["Component SKU"])] = {
+                "name": str(r["AutoMatch EF Name"]),
+                "value": float(r["AutoMatch EF Value"]),
+                "unit": "kgCO2e/kg",
+                "source": "EcoInvent 3.12 cut-off (validé SBM)",
+                "geo": None,
+            }
+    return overrides
+
+
 def _session_lookups(component_database, product_database, materials_and_factors):
     """Indexes de secours (spéc v0.98) quand la collecte n'a pas la valeur :
     - UVP description : MB_Product ZUVP_DES ;
@@ -422,10 +495,20 @@ def build_ef_matching_rows(collecte: pd.DataFrame, matching: pd.DataFrame | None
         if m is not None and m["Statut"] == "MATCHÉ" and pd.notna(m["FE proposé (kg CO2e/kg)"]):
             geo = m["Géographie"]
             dqr = compute_dqr(geo, EF_SOURCE, True)
+            rm_context = " ".join(
+                str(x) for x in [row.get("Raw Material (MB Product)"), row.get("Component Designation")] if x and str(x) != "nan"
+            )
+            rm_rationale = (
+                f"Automatching ecoinvent : la règle « {m['Règle de matching']} » a reconnu le composant "
+                f"(matière/désignation : « {rm_context or 'non renseigné'} »). "
+                f"Le dataset « {m['Dataset ecoinvent']} » ({geo}) a été retenu par cascade géographique "
+                f"pays fournisseur -> RER -> RoW -> GLO. "
+                f"FE = {m['FE proposé (kg CO2e/kg)']} kgCO2e/kg (GWP100, EF v3.1, EcoInvent 3.12 cut-off)."
+            )
             row.update(
                 {
                     "RM AutoMatch EF Name": m["Dataset ecoinvent"],
-                    "RM AutoMatch EF Rationale": m["Règle de matching"],
+                    "RM AutoMatch EF Rationale": rm_rationale,
                     "RM AutoMatch EF Value": float(m["FE proposé (kg CO2e/kg)"]),
                     "RM AutoMatch EF Unit": "kgCO2e/kg",
                     "RM AutoMatch EF Geography": geo,
@@ -446,10 +529,18 @@ def build_ef_matching_rows(collecte: pd.DataFrame, matching: pd.DataFrame | None
             )
             if transfo_ds is not None:
                 t_dqr = compute_dqr(transfo_ds["geo"], EF_SOURCE, True)
+                transfo_rationale = (
+                    f"Automatching ecoinvent du procédé de transformation : la règle « {transfo_rule} » "
+                    f"a reconnu le procédé à partir de la matière/désignation « {transfo_text} ». "
+                    f"Le dataset « {transfo_ds['name']} » ({transfo_ds['geo']}) a été retenu par cascade "
+                    f"géographique. FE = {round(float(transfo_ds['gwp_per_unit']), 5)} kgCO2e/kg "
+                    f"(GWP100, EF v3.1, EcoInvent 3.12 cut-off) ; ce FE s'ajoute au FE matière "
+                    f"(impact = matière + procédé de transformation du composant)."
+                )
                 row.update(
                     {
                         "Transfo AutoMatch Process Name": str(transfo_ds["prod"]),
-                        "Transfo AutoMatch EF Rationale": transfo_rule,
+                        "Transfo AutoMatch EF Rationale": transfo_rationale,
                         "Transfo AutoMatch Process EF Name": transfo_ds["name"],
                         "Transfo AutoMatch Process EF Value": round(float(transfo_ds["gwp_per_unit"]), 5),
                         "Transfo AutoMatch Process EF Unit": "kgCO2e/kg",
