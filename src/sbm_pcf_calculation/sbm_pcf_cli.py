@@ -196,7 +196,11 @@ def cmd_compute(args) -> int:
     session.metadata["work_dir"] = args.work_dir
     from .pcf_calc import run_pcf_calculation
 
-    session = run_pcf_calculation(session, transformation_path=args.transformation)
+    session = run_pcf_calculation(
+        session,
+        transformation_path=args.transformation,
+        collection_path=args.collection,
+    )
     results = session.product_results
     pcf = results["PCF Value"] if "PCF Value" in results.columns else None
     print(f"Products computed: {len(results)}")
@@ -294,6 +298,12 @@ def main(argv=None) -> int:
 
     compute = sub.add_parser("compute", help="Compute PCF per product with quality flags")
     compute.add_argument("--transformation", default=None, help="Filled transformation input file")
+    compute.add_argument(
+        "--collection",
+        default=None,
+        help="Filled data collection workbook (.xlsx) : ses données saisies "
+             "surchargent sources et EF matching (priorité Data Collection)",
+    )
     compute.add_argument("--output", default=None, help="Results output (.xlsx)")
     compute.add_argument(
         "--check-baseline",
