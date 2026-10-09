@@ -181,7 +181,11 @@ class TestWritePcfResults:
         out = tmp_path / "pcf_results.xlsx"
         write_pcf_results(out, component_lines, product_results)
         workbook = load_workbook(out)
-        assert workbook.sheetnames == ["PCF_Calculation", "MissingEF_Matching"]
+        assert workbook.sheetnames == ["PCF_Synthese", "PCF_Calculation", "MissingEF_Matching"]
+        synthese_ws = workbook["PCF_Synthese"]
+        assert synthese_ws.freeze_panes == "C2"
+        assert synthese_ws["A2"].value == "SORHOY15"
+        assert synthese_ws.cell(row=2, column=3).value == 0.693
         pcf_ws = workbook["PCF_Calculation"]
         assert pcf_ws.freeze_panes == "C3"
         missing_ws = workbook["MissingEF_Matching"]
@@ -207,3 +211,70 @@ class TestWritePcfResults:
         pcf_ws = workbook["PCF_Calculation"]
         pcf_value_idx = [name for name, _ in PCF_COLUMNS].index("PCF GHG Value") + 1
         assert pcf_ws.cell(row=3, column=pcf_value_idx).number_format == "0.000"
+
+    def test_pcf_calculation_block_colors_and_groupings(self, tmp_path, component_lines, product_results):
+        from openpyxl.utils import get_column_letter
+
+        out = tmp_path / "pcf_results.xlsx"
+        write_pcf_results(out, component_lines, product_results)
+        workbook = load_workbook(out)
+        pcf_ws = workbook["PCF_Calculation"]
+        names = [name for name, _ in PCF_COLUMNS]
+        # Couleurs d'en-tête par bloc (conventions Fichier de collecte).
+        produit_idx = names.index("Product SKU") + 1
+        assert pcf_ws.cell(row=2, column=produit_idx).fill.fgColor.rgb == "FF13501B"
+        rm_idx = names.index("RM EF Name") + 1
+        assert pcf_ws.cell(row=2, column=rm_idx).fill.fgColor.rgb == "FFA6A6A6"
+        flag_idx = names.index("Data validation flag") + 1
+        assert pcf_ws.cell(row=2, column=flag_idx).fill.fgColor.rgb == "FFFFC000"
+        # Colonnes GROUPING verticales grisées (en-tête + données).
+        grouping_idx = names.index("Product Details") + 1
+        grouping_cell = pcf_ws.cell(row=2, column=grouping_idx)
+        assert grouping_cell.fill.fgColor.rgb == "FFD9D9D9"
+        assert grouping_cell.alignment.textRotation == 90
+        assert pcf_ws.cell(row=3, column=grouping_idx).fill.fgColor.rgb == "FFD9D9D9"
+        # Groupings : bornes exactes de la spec v0.98 (outlineLevel = 1).
+        for first, last in [
+            ("Product Category Code", "Product Stock unit"),
+            ("Component Category Code", "Component Pack unit box"),
+            ("Quantity", "Recycled %"),
+            ("Supplier PDS", "Supplier PCF external review"),
+            ("RM EF Name", "RM DQR value"),
+            ("Transformation Energy Name", "Transformation DQR value"),
+            ("Freight Supplier Code", "Freight Transportation Mode"),
+            ("Use EF Name", "Use DQR value"),
+            ("EoL EF Name", "EoL DQR value"),
+        ]:
+            i0 = names.index(first)
+            i1 = names.index(last)
+            for i in range(i0, i1 + 1):
+                assert pcf_ws.column_dimensions[get_column_letter(i + 1)].outline_level == 1, (first, last, names[i])
+
+    def test_missing_ef_sheet_uses_block_colors(self, tmp_path, component_lines, product_results):
+        out = tmp_path / "pcf_results.xlsx"
+        write_pcf_results(out, component_lines, product_results)
+        workbook = load_workbook(out)
+        missing_ws = workbook["MissingEF_Matching"]
+        names = [name for name, _ in MISSING_EF_COLUMNS]
+        automatch_idx = names.index("RM AutoMatch EF Name") + 1
+        assert missing_ws.cell(row=2, column=automatch_idx).fill.fgColor.rgb == "FF13501B"
+        grouping_idx = names.index("Component Details") + 1
+        assert missing_ws.cell(row=2, column=grouping_idx).fill.fgColor.rgb == "FFD9D9D9"
+        assert missing_ws.cell(row=2, column=grouping_idx).alignment.textRotation == 90
+
+    def test_synthese_one_row_per_product_with_phases(self, tmp_path, component_lines, product_results):
+        out = tmp_path / "pcf_results.xlsx"
+        write_pcf_results(out, component_lines, product_results)
+        workbook = load_workbook(out)
+        synthese_ws = workbook["PCF_Synthese"]
+        header = [cell.value for cell in synthese_ws[1]]
+        assert header[:5] == ["Product SKU", "Product Designation", "PCF Value", "DQR", "PDS"]
+        for phase in ("Raw Material", "Packaging", "Transformation", "Freight", "Use", "End of Life"):
+            assert f"{phase} - GHG Value" in header
+            assert f"{phase} - DQR" in header
+            assert f"{phase} - % PCF total" in header
+        # Une seule ligne produit : pas de détail composant.
+        assert synthese_ws.max_row == 2
+        assert synthese_ws.cell(row=2, column=1).value == "SORHOY15"
+        ghg_idx = header.index("Raw Material - GHG Value") + 1
+        assert synthese_ws.cell(row=2, column=ghg_idx).value == 0.6

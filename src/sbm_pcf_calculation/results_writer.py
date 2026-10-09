@@ -19,21 +19,85 @@ from pathlib import Path
 
 import pandas as pd
 
+from .datashare import GROUPING
+from .report import SYNTHESE_COLUMNS, build_synthese
 from .results_spec import MANDATORY, MISSING_EF_COLUMNS, PCF_COLUMNS
 
 GHOUPING_PATTERN = re.compile(r"Group between '?(.*?)'? and '?(.*?)'?\s*$")
 
+# Bornes exactes des groupings de la spec v0.98 (Spec_CalculationFile,
+# onglet PCF_Calculation, colonne J) : première et dernière colonne du groupe.
 COLUMN_GROUPS_PCF: list[tuple[str, str]] = [
     ("Product Category Code", "Product Stock unit"),
-    ("Component Category Code", "Component Stock unit"),
+    ("Component Category Code", "Component Pack unit box"),
     ("Quantity", "Recycled %"),
     ("Supplier PDS", "Supplier PCF external review"),
     ("RM EF Name", "RM DQR value"),
     ("Transformation Energy Name", "Transformation DQR value"),
-    ("Freight Supplier Code", "Freight DQR value"),
+    ("Freight Supplier Code", "Freight Transportation Mode"),
     ("Use EF Name", "Use DQR value"),
     ("EoL EF Name", "EoL DQR value"),
 ]
+
+# Blocs de couleurs de l'onglet PCF_Calculation (conventions du Fichier de
+# collecte : Produit vert foncé, Composants vert, Description du composant
+# vert clair, Supplier PCF crème, Transformation pêche, Flag ambre, GROUPING
+# gris ; phases de cycle de vie : palette de l'onglet Synthèse du rapport).
+PCF_BLOCK_COLORS: dict[str, str] = {
+    "Produit": "FF13501B",
+    "Composants": "FF75A67C",
+    "Description du composant": "FFA3C4A7",
+    "Supplier PCF": "FFFBE3D6",
+    "RM": "FFA6A6A6",
+    "Transformation": "FFF6C6AD",
+    "Freight": "FF6FC5E6",
+    "Use": "FFF2AA84",
+    "EoL": "FFC7C7C7",
+    "Flag": "FFFFC000",
+    GROUPING: "FFD9D9D9",
+}
+PCF_BLOCK_FONT_COLORS: dict[str, str] = {
+    "Produit": "FFFFFFFF",
+    GROUPING: "FF404040",
+}
+
+
+def _pcf_block(name: str) -> str:
+    """Bloc de style d'une colonne PCF (couleur d'en-tête / GROUPING)."""
+    if name in {
+        "Product Details", "Component Details", "Component Material",
+        "Supplier PCF", "RM GHG details", "Transformation Details",
+        "Freight  Details", "Use GHG details", "EoL GHG details",
+    }:
+        return GROUPING
+    if name in ("Data validation flag", "Data validation flag impact"):
+        return "Flag"
+    if name in ("Product SKU", "Product Designation", "PCF GHG Value",
+               "PCF GHG Unit", "PDS Product", "DQR Product"):
+        return "Produit"
+    if name.startswith("Product "):
+        return "Produit"
+    if name.startswith("Component "):
+        return "Composants"
+    if name in ("Quantity", "Net Weight", "Net Weight Unit", "Gross Weight",
+               "Gross Weight Unit", "Stock unit", "UVP description",
+               "Raw Material (MB Product)", "Raw Material - Carbon Footprint",
+               "Recycled %", "RM Data PDS value"):
+        return "Description du composant"
+    if name.startswith("Supplier "):
+        return "Supplier PCF"
+    if name.startswith("RM "):
+        return "RM"
+    if name.startswith("Transformation "):
+        return "Transformation"
+    if name.startswith("Freight "):
+        return "Freight"
+    if name.startswith("Use "):
+        return "Use"
+    if name.startswith("EoL "):
+        return "EoL"
+    return "Composants"
+
 
 COLUMN_GROUPS_MISSING_EF: list[tuple[str, str]] = [
     ("Component Category Code", "Component Pack unit box"),
@@ -188,35 +252,61 @@ def _column_index(columns: list[str], name: str) -> int:
         ) from exc
 
 
-HEADER_FILL = "E97132"
 HEADER_FONT_COLOR = "FFFFFF"
 MANDATORY_FILL = "13501B"
 PCF_TAB_FILL = "0B3041"
+SYNTHESE_TAB_FILL = "FF1F497D"
 
 
 def _style_sheet(ws, columns: list[tuple[str, str | None]],
-                 sheet_columns: list[str], groups: list[tuple[str, str]]) -> None:
-    """Apply the v0.97 sheet layout: mandatory row, header, groups, freeze."""
+                 sheet_columns: list[str], groups: list[tuple[str, str]],
+                 block_of=_pcf_block,
+                 block_colors: dict[str, str] | None = None,
+                 block_font_colors: dict[str, str] | None = None) -> None:
+    """Apply the v0.98 sheet layout: per-block header colors, vertical
+    GROUPING columns, mandatory row, outline groups, freeze at C3."""
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
-    header_fill = PatternFill("solid", fgColor=HEADER_FILL)
+    if block_colors is None:
+        block_colors = PCF_BLOCK_COLORS
+    if block_font_colors is None:
+        block_font_colors = PCF_BLOCK_FONT_COLORS
     mandatory_fill = PatternFill("solid", fgColor=MANDATORY_FILL)
+    grouping_fill = PatternFill("solid", fgColor=block_colors[GROUPING])
+
+    data_end_row = max(ws.max_row, 3)
+    grouping_blocks: list[int] = []
 
     # Row 1: exact "Mandatory field" value from the spec (column I).
     for idx, name in enumerate(sheet_columns, start=1):
+        block = block_of(name)
         cell = ws.cell(row=1, column=idx, value=MANDATORY.get(name))
-        cell.fill = mandatory_fill
-        cell.font = Font(bold=True, size=9, color=HEADER_FONT_COLOR)
-        cell.alignment = Alignment(horizontal="center")
-    # Row 2: header.
+        if block == GROUPING:
+            grouping_blocks.append(idx)
+            cell.fill = grouping_fill
+            cell.font = Font(bold=True, size=9, color=block_font_colors.get(GROUPING, "FF404040"))
+        else:
+            cell.fill = mandatory_fill
+            cell.font = Font(bold=True, size=9, color=HEADER_FONT_COLOR)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    # Row 2: header, one fill color per block (Data Collection conventions).
     for idx, (name, _fmt) in enumerate(columns, start=1):
+        block = block_of(name)
         cell = ws.cell(row=2, column=idx, value=name)
-        cell.fill = header_fill
-        cell.font = Font(bold=True, color=HEADER_FONT_COLOR)
-        cell.alignment = Alignment(horizontal="center", wrap_text=True)
-    ws.row_dimensions[1].height = 20.0
-    ws.row_dimensions[2].height = 45.0
+        cell.fill = PatternFill("solid", fgColor=block_colors[block])
+        cell.font = Font(bold=True, color=block_font_colors.get(block, "FF000000"))
+        if block == GROUPING:
+            cell.alignment = Alignment(vertical="center", textRotation=90, wrap_text=True)
+            ws.column_dimensions[get_column_letter(idx)].width = 3.43
+        else:
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[1].height = 30.0
+    ws.row_dimensions[2].height = 60.0
+    # GROUPING columns: fill grisé sur toute la hauteur des données.
+    for idx in grouping_blocks:
+        for row_idx in range(3, data_end_row + 1):
+            ws.cell(row=row_idx, column=idx).fill = grouping_fill
     # Column groups (outline levels).
     group_level = 1
     for start, end in groups:
@@ -226,35 +316,150 @@ def _style_sheet(ws, columns: list[tuple[str, str | None]],
         except ValueError:
             continue
         for i in range(min(i0, i1), max(i0, i1) + 1):
-            ws.column_dimensions[get_column_letter(i + 1)].outline_level = group_level
-        if i1 < i0:
-            for i in range(max(i0, i1), min(i0, i1) - 1, -1):
-                ws.column_dimensions[get_column_letter(i + 1)].outline_level = group_level
+            dim = ws.column_dimensions[get_column_letter(i + 1)]
+            dim.outline_level = group_level
+            dim.hidden = False
     ws.sheet_properties.outlinePr.summaryBelow = False
+    ws.sheet_properties.outlinePr.summaryRight = False
     # Freeze at C3: two header rows + two identifying columns.
     ws.freeze_panes = "C3"
+    ws.auto_filter.ref = f"A2:{get_column_letter(len(columns))}{data_end_row}"
+
+
+def _missing_ef_block(name: str) -> str:
+    """Bloc de style d'une colonne MissingEF_Matching (v0.98)."""
+    if name in {
+        "Component Details", "Component Material", "AutoMatch Details",
+        "Transfo AutoMatch Details", "UserValidation", "Transfo UserValidation Details",
+    }:
+        return GROUPING
+    if name in ("Data validation flag", "Data validation flag impact"):
+        return "Flag"
+    if name == "Component Supplier Country":
+        return "Composants"
+    if name.startswith("Component "):
+        return "Composants"
+    if name.startswith("Transfo AutoMatch"):
+        if name.endswith("DQR value"):
+            return "Calculé"
+        return "Transfo AutoMatch"
+    if name.startswith("Transfo UserValidation"):
+        if name.endswith("DQR value"):
+            return "Calculé"
+        return "Transfo UserValidation"
+    if name.startswith("UserValidation"):
+        if name.endswith("DQR value"):
+            return "Calculé"
+        return "UserValidation"
+    if name.startswith("RM AutoMatch"):
+        if name.endswith("DQR value"):
+            return "Calculé"
+        return "AutoMatch"
+    return "Description du composant"
+
+
+def build_synthese_sheet(component_lines: pd.DataFrame) -> pd.DataFrame:
+    """PCF_Synthese sheet: one row per product with the total PCF/DQR/PDS
+    and the breakdown by lifecycle phase (no component detail)."""
+    from .report import build_synthese as _build
+
+    if component_lines is None or component_lines.empty:
+        return pd.DataFrame(columns=SYNTHESE_COLUMNS)
+    sheet = _build(component_lines)
+    return sheet.reindex(columns=SYNTHESE_COLUMNS)
+
+
+def _style_synthese_sheet(ws, synthese: pd.DataFrame) -> None:
+    """Style de l'onglet PCF_Synthese : en-têtes de bloc produit en bleu,
+    une couleur par phase du cycle de vie, formats nombre, groupings et
+    volets figés (mêmes conventions que l'onglet Synthèse du rapport)."""
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    header_fill = PatternFill("solid", fgColor="FF156082")
+    phase_colors = {
+        "Raw Material": "FFA3C4A7",
+        "Packaging": "FFD1E1D3",
+        "Transformation": "FFD1E1D3",
+        "Freight": "FF6FC5E6",
+        "Use": "FFF2AA84",
+        "End of Life": "FFC7C7C7",
+    }
+    data_end_row = max(ws.max_row, 2)
+    for col_idx, col in enumerate(SYNTHESE_COLUMNS, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=col)
+        phase = col.split(" - ")[0] if " - " in col else None
+        if col in ("Product SKU", "Product Designation", "PCF Value", "DQR", "PDS"):
+            cell.fill = header_fill
+            cell.font = Font(color="FFFFFFFF", bold=True)
+        elif phase in phase_colors:
+            cell.fill = PatternFill("solid", fgColor=phase_colors[phase])
+            cell.font = Font(color="FF000000", bold=True)
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+        number_format = None
+        if col.endswith("% PCF total"):
+            number_format = "0.00%"
+        elif col not in ("Product SKU", "Product Designation"):
+            number_format = "#,##0.000"
+        if number_format:
+            for row_idx in range(2, data_end_row + 1):
+                ws.cell(row=row_idx, column=col_idx).number_format = number_format
+    for phase in ("Raw Material", "Packaging", "Transformation", "Freight", "Use", "End of Life"):
+        first = f"{phase} - PDS Activity Data"
+        last = f"{phase} - DQR"
+        if first in SYNTHESE_COLUMNS and last in SYNTHESE_COLUMNS:
+            for col_idx in range(
+                SYNTHESE_COLUMNS.index(first) + 1,
+                SYNTHESE_COLUMNS.index(last) + 2,
+            ):
+                ws.column_dimensions[get_column_letter(col_idx)].outlineLevel = 1
+    ws.sheet_properties.outlinePr.summaryRight = True
+    ws.row_dimensions[1].height = 60.0
+    ws.freeze_panes = "C2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(SYNTHESE_COLUMNS))}{data_end_row}"
+    ws.sheet_properties.tabColor = SYNTHESE_TAB_FILL
 
 
 def write_pcf_results(output_path: str | Path,
                       component_lines: pd.DataFrame,
                       product_results: pd.DataFrame | None = None,
                       matching: pd.DataFrame | None = None) -> Path:
-    """Write the pcf_results.xlsx deliverable (PCF_Calculation + MissingEF_Matching)."""
+    """Write the pcf_results.xlsx deliverable
+    (PCF_Synthese + PCF_Calculation + MissingEF_Matching)."""
     from openpyxl import Workbook
 
     pcf_sheet = build_pcf_sheet(component_lines, product_results) if component_lines is not None else _product_only_pcf_sheet(product_results)
     missing_sheet = build_missing_ef_sheet(component_lines, matching) if component_lines is not None else pd.DataFrame(columns=[name for name, _ in MISSING_EF_COLUMNS])
+    synthese_sheet = (
+        build_synthese_sheet(component_lines)
+        if component_lines is not None
+        else pd.DataFrame(columns=SYNTHESE_COLUMNS)
+    )
+
+    from .ef_matching_writer import BLOCK_COLORS, BLOCK_FONT_COLORS
 
     output_path = Path(output_path)
     workbook = Workbook()
     workbook.remove(workbook.active)
+    synthese_ws = workbook.create_sheet("PCF_Synthese")
+    _write_sheet_rows(synthese_ws, synthese_sheet, [(c, None) for c in SYNTHESE_COLUMNS], start_row=2)
+    _style_synthese_sheet(synthese_ws, synthese_sheet)
     for sheet_name, df, columns, groups in (
         ("PCF_Calculation", pcf_sheet, PCF_COLUMNS, COLUMN_GROUPS_PCF),
         ("MissingEF_Matching", missing_sheet, MISSING_EF_COLUMNS, COLUMN_GROUPS_MISSING_EF),
     ):
         ws = workbook.create_sheet(sheet_name)
         _write_sheet_rows(ws, df, columns)
-        _style_sheet(ws, columns, [name for name, _ in columns], groups)
+        if sheet_name == "PCF_Calculation":
+            _style_sheet(ws, columns, [name for name, _ in columns], groups)
+        else:
+            _style_sheet(
+                ws, columns, [name for name, _ in columns], groups,
+                block_of=_missing_ef_block,
+                block_colors=BLOCK_COLORS,
+                block_font_colors=BLOCK_FONT_COLORS,
+            )
+    workbook["PCF_Calculation"].sheet_properties.tabColor = PCF_TAB_FILL
     workbook.save(output_path)
     return output_path
 
@@ -272,21 +477,26 @@ def write_ef_matching(output_path: str | Path,
     ws = workbook.active
     ws.title = "MissingEF_Matching"
     _write_sheet_rows(ws, sheet, MISSING_EF_COLUMNS)
+    from .ef_matching_writer import BLOCK_COLORS, BLOCK_FONT_COLORS
     _style_sheet(ws, MISSING_EF_COLUMNS,
-                 [name for name, _ in MISSING_EF_COLUMNS], COLUMN_GROUPS_MISSING_EF)
+                 [name for name, _ in MISSING_EF_COLUMNS], COLUMN_GROUPS_MISSING_EF,
+                 block_of=_missing_ef_block,
+                 block_colors=BLOCK_COLORS,
+                 block_font_colors=BLOCK_FONT_COLORS)
     workbook.save(output_path)
     return output_path
 
 
 def _write_sheet_rows(ws, df: pd.DataFrame,
-                     columns: list[tuple[str, str | None]]) -> None:
-    """Write the data rows (from row 3) with per-column number formats."""
+                     columns: list[tuple[str, str | None]],
+                     start_row: int = 3) -> None:
+    """Write the data rows (from start_row) with per-column number formats."""
     values = df.values.tolist()
-    for row_idx, row in enumerate(values, start=3):
+    for row_idx, row in enumerate(values, start=start_row):
         for col_idx, value in enumerate(row, start=1):
             ws.cell(row=row_idx, column=col_idx, value=value)
     for col_idx, (_name, fmt) in enumerate(columns, start=1):
         if not fmt:
             continue
-        for row_idx in range(3, 3 + len(values)):
+        for row_idx in range(start_row, start_row + len(values)):
             ws.cell(row=row_idx, column=col_idx).number_format = fmt
