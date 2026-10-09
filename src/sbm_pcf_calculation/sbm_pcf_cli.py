@@ -108,9 +108,9 @@ def cmd_ef_match(args) -> int:
     print(f"Matched: {n}/{len(matching)}")
     out = Path(args.output or "ef_matching.xlsx")
     if session.component_results is not None:
-        from .results_writer import write_ef_matching
-
-        write_ef_matching(out, session.component_results, matching)
+        from .ef_matching import write_ef_matching as write_ef_matching_full
+        n_rows = write_ef_matching_full(str(out), session.component_results, matching=matching)
+        print(f"Composants sans FE listés (spec v0.97) : {n_rows}")
     else:
         matching.to_excel(out, index=False)
     validated = matching[matching["Statut"] == "MATCHÉ"].copy()
