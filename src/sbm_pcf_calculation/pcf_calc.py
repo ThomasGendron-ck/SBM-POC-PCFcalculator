@@ -125,8 +125,14 @@ def flag_suspect_products(product_results: pd.DataFrame,
 
 def run_pcf_calculation(session: PcfSession,
                         transformation_path: str | Path | None = None,
+                        collection_path: str | Path | None = None,
                         reload_sources: bool = False) -> PcfSession:
     """Full calculation flow: component lines -> per-product PCF -> flags.
+
+    `collection_path` (Fichier de collecte rempli) surcharge en dernier les
+    données sources : priorité Data Collection > EF matching (ef-validate) >
+    sources. Un Supplier PCF value saisi remplace le GHG matière calculé ;
+    les saisies transformation régénèrent le Transformation GHG.
     Saves the results back into the session."""
     import time
 
@@ -141,6 +147,11 @@ def run_pcf_calculation(session: PcfSession,
         "component lines (BOM x factors x freight)",
         lambda: build_component_lines(session, transformation_path),
     )
+    if collection_path is not None:
+        component_lines = _timed(
+            "apply filled data collection (priorité Data Collection)",
+            lambda: _apply_collection(component_lines, collection_path),
+        )
     product_results = _timed(
         "PCF per product", lambda: compute_pcf_per_product(component_lines))
     product_results = _timed(
@@ -151,6 +162,16 @@ def run_pcf_calculation(session: PcfSession,
     session.product_results = product_results
     _timed("save session", lambda: _save_session(session))
     return session
+
+
+def _apply_collection(component_lines: pd.DataFrame, collection_path: str | Path) -> pd.DataFrame:
+    """Applique le Fichier de collecte rempli sur les lignes composants puis
+    recalcule les totaux produit."""
+    from .collect import apply_filled_collection, read_filled_collection_component, recalc_product_totals
+
+    filled = read_filled_collection_component(collection_path)
+    collecte = apply_filled_collection(component_lines, filled)
+    return recalc_product_totals(collecte)
 
 
 def _save_session(session: PcfSession) -> None:

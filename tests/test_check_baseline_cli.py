@@ -28,7 +28,7 @@ def fake_compute(monkeypatch):
         )
         monkeypatch.setattr(
             "sbm_pcf_calculation.pcf_calc.run_pcf_calculation",
-            lambda session, transformation_path=None, reload_sources=False: session,
+            lambda session, transformation_path=None, collection_path=None, reload_sources=False: session,
         )
 
     return _install

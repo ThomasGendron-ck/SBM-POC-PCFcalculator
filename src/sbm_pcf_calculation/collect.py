@@ -723,3 +723,124 @@ def build_collecte(
         collecte = _apply_transformation(collecte, saisie)
         collecte = collecte[COLLECTE_COLUMNS]
     return collecte
+
+
+# Champs du Fichier de collecte (onglet Component) qui surchargent les données
+# sources dans le calcul final, avec la colonne équivalente de la collecte.
+# Priorité finale : Data Collection rempli > EF matching validé > sources.
+COLLECTION_OVERRIDE_FIELDS = {
+    "Supplier Code": "Supplier code",
+    "Supplier Name": "Supplier Name",
+    "Raw Material (MB Product)": "Raw Material",
+    "Raw Material - Carbon Footprint": "Raw Material - Carbon Footprint",
+    "UVP description": "UVP description",
+    "Recycled %": "Recycled %",
+    "Net Weight": "Net Weight",
+    "Net Weight Unit": "Net Weight Unit",
+    "Gross Weight": "Gross Weight",
+    "Scrap Rate": "Scrap Rate",
+    "Supplier PCF value": "Supplier PCF value",
+    "Supplier PCF Unit": "Supplier PCF Unit",
+    "Supplier PDS": "Supplier PDS",
+    "Supplier DQR": "Supplier DQR",
+    "Supplier PCF source": "Supplier PCF source",
+    "Transformation Process Name": "Transformation Process Name",
+    "Transformation Process EF Name": "Transformation Process EF Name",
+    "Transformation Process EF Value": "Transformation Process EF Value",
+    "Transformation Process EF Unit": "Transformation Process EF Unit",
+    "Transformation EF Source": "Transformation EF Source",
+    "Transformation Process Scrap Rate": "Scrap Rate",
+}
+
+COLLECTION_SOURCE_LABEL = "Data Collection (saisie SBM/fournisseur)"
+
+
+def recalc_product_totals(collecte: pd.DataFrame) -> pd.DataFrame:
+    """Recalcule les totaux produit (PCF Value, DQR Product, PDS Product, part
+    du composant) après surcharge des lignes composants (Data Collection)."""
+    collecte = collecte.copy()
+    for sku, lines in collecte.groupby("Product SKU"):
+        poids_totaux = sum(
+            r["Net Weight"] * r["Quantity"]
+            for _, r in lines.iterrows()
+            if pd.notna(r["Net Weight"]) and pd.notna(r["Quantity"])
+        )
+        pcf_value = sum(r["RM GHG"] for _, r in lines.iterrows() if pd.notna(r["RM GHG"]))
+        dqr_terms = [
+            (r["RM DQR value"], r["Net Weight"] * r["Quantity"] / poids_totaux)
+            for _, r in lines.iterrows()
+            if pd.notna(r["RM DQR value"]) and poids_totaux and pd.notna(r["Net Weight"]) and pd.notna(r["Quantity"])
+        ]
+        dqr_product = sum(d * p for d, p in dqr_terms) / sum(p for _, p in dqr_terms) if dqr_terms else np.nan
+        for idx in lines.index:
+            poids_comp = collecte.at[idx, "Net Weight"] * collecte.at[idx, "Quantity"] if pd.notna(collecte.at[idx, "Net Weight"]) and pd.notna(collecte.at[idx, "Quantity"]) else np.nan
+            collecte.at[idx, "Part du composant dans le produit"] = poids_comp / poids_totaux if pd.notna(poids_comp) and poids_totaux else np.nan
+            collecte.at[idx, "PCF Value"] = pcf_value if pcf_value else np.nan
+            collecte.at[idx, "PCF Unit"] = UNIT_PCF if pcf_value else None
+            collecte.at[idx, "DQR Product"] = dqr_product
+            collecte.at[idx, "PDS Product"] = 0.0 if pcf_value else np.nan
+    return collecte
+
+
+def read_filled_collection_component(path: str | Path) -> pd.DataFrame:
+    """Relit l'onglet Component du Fichier de collecte rempli.
+
+    En-têtes en ligne 2, une ligne par composant (SKU, colonne A).
+    """
+    df = pd.read_excel(path, sheet_name="Component", header=1)
+    df.columns = [str(c).strip() for c in df.columns]
+    df = df.loc[:, ~pd.Index(df.columns).duplicated()]
+    if "Component SKU" not in df.columns:
+        raise ValueError(f"Colonne 'Component SKU' introuvable dans l'onglet Component de {path}")
+    df = df[df["Component SKU"].notna()].copy()
+    df["Component SKU"] = df["Component SKU"].map(_text)
+    return df
+
+
+def apply_filled_collection(collecte: pd.DataFrame, filled: pd.DataFrame) -> pd.DataFrame:
+    """Surcharge les lignes composants avec les données du Fichier de collecte
+    rempli (priorité la plus haute : Data Collection > EF matching > sources).
+
+    - Les champs description/activité saisis (fournisseur, matière, poids,
+      recycled %, scrap rate) remplacent les valeurs sources.
+    - Un Supplier PCF value fourni remplace le RM GHG calculé : la ligne
+      composant porte alors directement le PCF fournisseur (kgCO2e), la
+      contribution au PCF produit est le PCF fournisseur lui-même.
+    - Les champs transformation saisis régénèrent le Transformation GHG
+      (FE procédé x Quantity x Net Weight x (1 + Scrap Rate)).
+    """
+    if filled is None or filled.empty:
+        return collecte
+    collecte = collecte.copy()
+    collecte["Component SKU"] = collecte["Component SKU"].map(_text)
+    by_sku = filled.drop_duplicates(subset="Component SKU", keep="first").set_index("Component SKU")
+    matched = collecte["Component SKU"].isin(by_sku.index)
+    if not matched.any():
+        return collecte
+    for dst in collecte.index[matched]:
+        sku = collecte.at[dst, "Component SKU"]
+        src = by_sku.loc[sku]
+        for coll_col, coll_value in src.items():
+            target = COLLECTION_OVERRIDE_FIELDS.get(str(coll_col))
+            if target is None or target not in collecte.columns:
+                continue
+            if pd.isna(coll_value) or str(coll_value).strip() == "":
+                continue
+            collecte.at[dst, target] = coll_value
+        pcf_val = pd.to_numeric(src.get("Supplier PCF value"), errors="coerce")
+        if pd.notna(pcf_val) and pcf_val != 0:
+            collecte.at[dst, "RM GHG"] = float(pcf_val)
+            collecte.at[dst, "RM GHG Unit"] = _text(src.get("Supplier PCF Unit")) or UNIT_GHG
+            collecte.at[dst, "RM EF Source"] = COLLECTION_SOURCE_LABEL
+            collecte.at[dst, "RM EF Name"] = "PCF fournisseur (Data Collection)"
+            collecte.at[dst, "RM EF Value"] = None
+    fe_transfo = pd.to_numeric(collecte["Transformation Process EF Value"], errors="coerce")
+    has_transfo = matched & fe_transfo.notna()
+    if has_transfo.any():
+        scrap = pd.to_numeric(collecte["Scrap Rate"], errors="coerce")
+        scrap_factor = 1.0 + scrap.fillna(0.0)
+        ghg = fe_transfo * pd.to_numeric(collecte["Quantity"], errors="coerce") * pd.to_numeric(collecte["Net Weight"], errors="coerce") * scrap_factor
+        collecte.loc[has_transfo, "Transformation GHG"] = ghg[has_transfo]
+        collecte.loc[has_transfo, "Transformation GHG Unit"] = config.UNIT_GHG_TRANSFORMATION
+        collecte.loc[has_transfo, "Transformation EF Source"] = collecte.loc[has_transfo, "Transformation EF Source"].fillna(COLLECTION_SOURCE_LABEL)
+    return collecte

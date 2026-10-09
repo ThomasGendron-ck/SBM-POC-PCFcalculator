@@ -77,6 +77,30 @@ MATCH_RULES = [
     ("SOSIRYL|DOSE\\b", [r"injection moulding"], "Dose plastique (transformation)"),
 ]
 
+# Règles de matching des procédés de transformation (bloc Transfo AutoMatch,
+# spec v0.98) : catégorie composant / matière -> dataset ecoinvent du procédé.
+# L'impact d'un composant transformé (ex. bouteille PP injectée) = FE matière
+# + FE du procédé de transformation (injection, extrusion, soufflage...).
+# Ordre = priorité, première règle qui matche gagne ; le texte est construit
+# à partir de la matière, de la désignation, de la catégorie Sage et de la
+# catégorie de description.
+TRANSFO_MATCH_RULES = [
+    (r"\bPP\b|POLYPROPYLENE|DOSEUR|CAPCR|BOUCHON|TRIGGER", [r"injection moulding"], "Injection plastique (procédé transformation)"),
+    (r"\bPET\b|PET12|BOTEV|PREFORM", [r"injection moulding"], "Injection PET / préforme (procédé transformation)"),
+    (r"\bHDPE\b|PEHD|BOTPE|BIDON|LAIZE", [r"blow moulding"], "Soufflage bouteille (procédé transformation)"),
+    (r"\bLDPE\b|FILM|SAC |STRETCH|PALST|HYDROSOLUBLE|LAMINATE|FLXRL|PVOH", [r"blown film extrusion", r"film extrusion", r"packaging film production"], "Extrusion soufflage film (procédé transformation)"),
+    (r"CARTON|CAISSE|CASSH|OUTERCASE|ETUI", [r"corrugated board box production"], "Fabrication caisse carton (procédé transformation)"),
+    (r"ETIQUETTE|LAB\b|STICKER|IMPRIM", [r"offset printing"], "Impression étiquette (procédé transformation)"),
+    (r"VERRE|BOUTEILLE VERRE|GLASS", [r"glass packaging production", r"glass production, brown"], "Formage verre (procédé transformation)"),
+    (r"ALUMINIUM|ALU\b|AEROSOL ALU", [r"aluminium product manufacturing", r"aluminium casting"], "Façonnage aluminium (procédé transformation)"),
+    (r"ACIER|METAL|BIDON METAL|FERR|AEROSOL", [r"steel product manufacturing", r"metal working"], "Façonnage métal (procédé transformation)"),
+]
+
+# Valeurs par défaut du procédé quand aucune règle ne matche : PDS 0, DQR 4
+# (données génériques), pas de FE proposé (l'expert complète la ligne).
+TRANSFO_DEFAULT_PDS = 0
+TRANSFO_DEFAULT_DQR = 4.0
+
 GWP_COLUMN = ("EF v3.1", "climate change", "global warming potential (GWP100)", "kg CO2-Eq")
 
 
@@ -149,9 +173,35 @@ def pick_dataset(base: pd.DataFrame, keywords: list[str], country: str | None,
     return None
 
 
+def match_transfo_process(lcia_base: pd.DataFrame, text: str, country: str | None,
+                         cache: dict[str, pd.DataFrame] | None = None) -> tuple[pd.Series | None, str | None]:
+    """Matche un dataset ecoinvent de procédé de transformation (bloc Transfo
+    AutoMatch) à partir du texte matière/désignation/catégorie du composant.
+    Retourne (meilleur dataset, règle appliquée) ou (None, None).
+    """
+    if not text:
+        return None, None
+    up = str(text).upper()
+    for pattern, keywords, comment in TRANSFO_MATCH_RULES:
+        if re.search(pattern, up):
+            best = pick_dataset(lcia_base, keywords, country, cache)
+            if best is not None:
+                return best, comment
+    return None, None
+
+
 def missing_fe_components(collecte: pd.DataFrame) -> pd.DataFrame:
-    """Composants uniques sans FE, avec les champs de la spec MissingEF_Matching."""
-    no_fe = collecte[collecte["RM EF Value"].isna() & collecte["Component SKU"].notna()].copy()
+    """Composants uniques sans FE ou automatchés ecoinvent (vue « à valider
+    par l'expert » : les composants dont le FE vient d'un override ecoinvent
+    restent dans la liste pour validation), avec les champs de la spec
+    MissingEF_Matching."""
+    if "RM EF Source" in collecte.columns:
+        automatched = collecte["RM EF Source"].astype(str).str.contains("validé SBM", regex=False)
+    else:
+        automatched = pd.Series(False, index=collecte.index)
+    no_fe = collecte[
+        (collecte["RM EF Value"].isna() | automatched) & collecte["Component SKU"].notna()
+    ].copy()
     no_fe["pays"] = no_fe["Supplier code"].map(supplier_country)
     aggs = {
         "design": ("Component Designation", "first"),

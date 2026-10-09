@@ -65,10 +65,36 @@ def cmd_collect(args) -> int:
     session = _load_session(args)
     from .datashare import apply_v093
 
+    spec_path = args.spec
+    material_path = args.material
+    mb_product_path = args.mb_product
+    if args.input_file is None and (spec_path is None or material_path is None):
+        input_dir = session.metadata.get("input_dir") or (args.input if getattr(args, "input", None) else None)
+        if input_dir:
+            from .collect import resolve_inputs
+
+            resolved = resolve_inputs(input_dir)
+            if spec_path is None:
+                spec_path = str(resolved["produits_lm"])
+            if material_path is None:
+                material_path = str(resolved["material"])
+            if mb_product_path is None:
+                mb_product_path = str(resolved.get("mb_products", "")) or None
+            print(f"Sources résolues depuis {input_dir} :")
+            print(f"  Référencement LM (spec) : {spec_path}")
+            print(f"  Material and Packaging  : {material_path}")
+            if mb_product_path:
+                print(f"  Masterbase products    : {mb_product_path}")
+        else:
+            print(
+                "Aucune source disponible : lancez d'abord 'sbm-pcf load --input <dossier>' "
+                "ou passez --spec/--material pour pré-remplir le fichier de collecte.",
+                file=sys.stderr,
+            )
     print(f"Generating collection file -> {args.output}")
     counts = apply_v093(args.output, input_path=args.input_file, template_path=None,
-                         spec_path=args.spec, material_path=args.material,
-                         mb_product_path=args.mb_product)
+                         spec_path=spec_path, material_path=material_path,
+                         mb_product_path=mb_product_path)
     if counts is not None:
         print(f"Pre-filled: {counts[0]} products, {counts[1]} components.")
     print("Done.")
@@ -108,9 +134,14 @@ def cmd_ef_match(args) -> int:
     print(f"Matched: {n}/{len(matching)}")
     out = Path(args.output or "ef_matching.xlsx")
     if session.component_results is not None:
-        from .results_writer import write_ef_matching
-
-        write_ef_matching(out, session.component_results, matching)
+        from .ef_matching_writer import write_ef_matching as write_ef_matching_full
+        n_rows = write_ef_matching_full(
+            str(out), session.component_results, matching=matching,
+            lcia_base=session.lcia_base,
+            component_database=session.component_database,
+            product_database=session.product_database,
+        )
+        print(f"Composants sans FE listés (spec v0.98) : {n_rows}")
     else:
         matching.to_excel(out, index=False)
     validated = matching[matching["Statut"] == "MATCHÉ"].copy()
@@ -127,12 +158,49 @@ def cmd_ef_match(args) -> int:
     return 0
 
 
+def cmd_ef_validate(args) -> int:
+    """Relit le fichier EF Matching validé par l'expert ACV et injecte les FE
+    validés dans la session (priorité expert > automatch) pour le calcul."""
+    session = _load_session(args)
+    from .ef_matching_writer import read_validated_ef_matching, build_validated_overrides
+
+    validated = read_validated_ef_matching(args.input)
+    overrides = build_validated_overrides(validated)
+    n_valid = int((validated["Decision"] == "VALIDÉ").sum())
+    n_reject = int((validated["Decision"] == "REFUSÉ").sum())
+    n_wait = int((validated["Decision"] == "EN ATTENTE").sum())
+    print(f"Fichier relu : {len(validated)} composants "
+          f"({n_valid} validés, {n_reject} refusés, {n_wait} en attente)")
+    n_expert = sum(1 for o in overrides.values() if "expert ACV" in str(o["source"]))
+    print(f"FE injectés dans la session : {len(overrides)} "
+          f"(dont {n_expert} FE expert personnalisés)")
+    if n_reject:
+        rejected_no_ef = validated[
+            (validated["Decision"] == "REFUSÉ") & validated["EF Value"].isna()
+        ]
+        if not rejected_no_ef.empty:
+            print("Attention : composants refusés sans FE expert fourni (pas d'override appliqué) :",
+                  file=sys.stderr)
+            print(rejected_no_ef["Component SKU"].to_string(index=False), file=sys.stderr)
+    session.ef_overrides = overrides or None
+    from .cache import save_session
+
+    session.metadata["work_dir"] = args.work_dir
+    save_session(session, args.work_dir)
+    print("Session mise à jour : lancez 'sbm-pcf compute' pour recalculer avec les FE validés.")
+    return 0
+
+
 def cmd_compute(args) -> int:
     session = _load_session(args)
     session.metadata["work_dir"] = args.work_dir
     from .pcf_calc import run_pcf_calculation
 
-    session = run_pcf_calculation(session, transformation_path=args.transformation)
+    session = run_pcf_calculation(
+        session,
+        transformation_path=args.transformation,
+        collection_path=args.collection,
+    )
     results = session.product_results
     pcf = results["PCF Value"] if "PCF Value" in results.columns else None
     print(f"Products computed: {len(results)}")
@@ -219,8 +287,23 @@ def main(argv=None) -> int:
     _add_global_options(ef_match)
     ef_match.set_defaults(func=cmd_ef_match)
 
+    ef_validate = sub.add_parser(
+        "ef-validate",
+        help="Import the expert-validated EF matching file into the session "
+             "(expert EF > automatch) before the final computation",
+    )
+    ef_validate.add_argument("--input", required=True, help="Validated EF matching workbook (.xlsx)")
+    _add_global_options(ef_validate)
+    ef_validate.set_defaults(func=cmd_ef_validate)
+
     compute = sub.add_parser("compute", help="Compute PCF per product with quality flags")
     compute.add_argument("--transformation", default=None, help="Filled transformation input file")
+    compute.add_argument(
+        "--collection",
+        default=None,
+        help="Filled data collection workbook (.xlsx) : ses données saisies "
+             "surchargent sources et EF matching (priorité Data Collection)",
+    )
     compute.add_argument("--output", default=None, help="Results output (.xlsx)")
     compute.add_argument(
         "--check-baseline",
