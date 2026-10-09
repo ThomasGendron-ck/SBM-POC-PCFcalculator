@@ -1,4 +1,4 @@
-"""Tests de la génération du fichier EF matching (spec v0.97 MissingEF_Matching)."""
+"""Tests de la génération du fichier EF matching (spec v0.98 MissingEF_Matching)."""
 
 from pathlib import Path
 
@@ -115,7 +115,7 @@ def test_write_file(tmp_path):
     ws = wb[EF_MATCHING_SHEET]
     headers = [ws.cell(row=2, column=i).value for i in range(1, ws.max_column + 1)]
     for (header, _), excel_header in zip(EF_MATCHING_COLUMNS, headers):
-        assert header == excel_header or header == "UserValidation EF Rationale (2)"
+        assert header == excel_header or header == "RM UserValidation EF Rationale (2)"
     assert ws.cell(row=2, column=1).value == "Component SKU"
     assert ws.cell(row=1, column=1).value == "Mandatory ->"
     assert ws.cell(row=3, column=1).value == "C1"
@@ -133,5 +133,6 @@ def test_write_file(tmp_path):
 
 def test_doublon_user_validation_rationale_renomme():
     headers = [h for h, _ in EF_MATCHING_COLUMNS]
-    assert headers.count("UserValidation EF Rationale") == 1
-    assert "UserValidation EF Rationale (2)" in headers
+    assert headers.count("RM UserValidation EF Rationale") == 1
+    assert "RM UserValidation EF Rationale (2)" in headers
+    assert "Component Pack Unit box" in headers

@@ -1,4 +1,4 @@
-"""Génération du fichier EF matching (spec v0.97, bloc MissingEF_Matching).
+"""Génération du fichier EF matching (spec v0.98, bloc MissingEF_Matching).
 
 Reprend le format du Fichier de collecte produit par ``datashare.py`` :
 - en-têtes en ligne 2, ligne 1 = champ obligatoire (italique, rouge si Yes) ;
@@ -45,7 +45,7 @@ EF_SOURCE = "EcoInvent 3.12 cut-off (EF v3.1 GWP100)"
 CALCULATED_FIELDS = {
     "RM AutoMatch DQR value",
     "Transfo AutoMatch DQR value",
-    "UserValidation DQR value",
+    "RM UserValidation DQR value",
     "Transfo UserValidation DQR value",
 }
 
@@ -82,7 +82,7 @@ MANDATORY = {
     "Component Supplier Code": "Yes",
     "Component Supplier Name": "Yes",
     "Component Supplier Country": "Automatic",
-    "Component Pack unit box": "Yes",
+    "Component Pack Unit box": "Yes",
     "UVP description": "Yes",
     "Raw Material (MB Product)": "Yes",
     "Raw Material - Carbon Footprint": "Yes, if available",
@@ -109,19 +109,19 @@ MANDATORY = {
     "Transfo AutoMatch TECH DQR": "Automatic",
     "Transfo AutoMatch TEMP DQR": "Automatic",
     "Transfo AutoMatch DQR value": "Automatic",
-    "UserValidation EF Yes/No": "Yes, if User validation",
-    "UserValidation EF Rationale": "Yes, if User validation",
-    "UserValidation EF Name": "Yes, if User validation",
-    "UserValidation EF Rationale (2)": "Yes, if User validation",
-    "UserValidation EF Value": "Yes, if User validation",
-    "UserValidation EF Unit": "Yes, if User validation",
-    "UserValidation EF Geography": "Yes, if User validation",
-    "UserValidation EF Source": "Yes, if User validation",
-    "UserValidation EF PDS": "Yes, if User validation",
-    "UserValidation GEO DQR": "Yes, if User validation",
-    "UserValidation TECH DQR": "Yes, if User validation",
-    "UserValidation TEMP DQR": "Yes, if User validation",
-    "UserValidation DQR value": "Automatic",
+    "RM UserValidation EF Yes/No": "Yes",
+    "RM UserValidation EF Rationale": "Yes",
+    "RM UserValidation EF Name": "Yes if EF not approved",
+    "RM UserValidation EF Rationale (2)": "Yes if EF not approved",
+    "RM UserValidation EF Value": "Yes if EF not approved",
+    "RM UserValidation EF Unit": "Yes if EF not approved",
+    "RM UserValidation EF Geography": "Yes if EF not approved",
+    "RM UserValidation EF Source": "Yes if EF not approved",
+    "RM UserValidation EF PDS": "Yes if EF not approved",
+    "RM UserValidation GEO DQR": "Yes if EF not approved",
+    "RM UserValidation TECH DQR": "Yes if EF not approved",
+    "RM UserValidation TEMP DQR": "Yes if EF not approved",
+    "RM UserValidation DQR value": "Automatic",
     "Transfo UserValidation Process Name": "Yes, if User validation",
     "Transfo UserValidation Process EF Name": "Yes, if User validation",
     "Transfo UserValidation Process EF Value": "Yes, if User validation",
@@ -136,11 +136,11 @@ MANDATORY = {
     "Data validation flag impact": "Automatic",
 }
 
-# Renommage Excel : la spec v0.97 contient deux colonnes « UserValidation EF
+# Renommage Excel : la spec v0.98 contient deux colonnes « RM UserValidation EF
 # Rationale » ; la seconde est suffixée en interne puis renommée à l'écriture.
-EXCEL_HEADER_MAP = {"UserValidation EF Rationale (2)": "UserValidation EF Rationale"}
+EXCEL_HEADER_MAP = {"RM UserValidation EF Rationale (2)": "RM UserValidation EF Rationale"}
 
-# Colonnes du fichier (ordre exact du bloc MissingEF_Matching, spec v0.97,
+# Colonnes du fichier (ordre exact du bloc MissingEF_Matching, spec v0.98,
 # lignes 128-192) : (en-tête interne, bloc).
 EF_MATCHING_COLUMNS: list[tuple[str, str]] = [
     ("Component SKU", "Composants"),
@@ -152,7 +152,7 @@ EF_MATCHING_COLUMNS: list[tuple[str, str]] = [
     ("Component Supplier Code", "Composants"),
     ("Component Supplier Name", "Composants"),
     ("Component Supplier Country", "Composants"),
-    ("Component Pack unit box", "Composants"),
+    ("Component Pack Unit box", "Composants"),
     ("Component Details", GROUPING),
     ("UVP description", "Description du composant"),
     ("Raw Material (MB Product)", "Description du composant"),
@@ -183,19 +183,19 @@ EF_MATCHING_COLUMNS: list[tuple[str, str]] = [
     ("Transfo AutoMatch TEMP DQR", "Transfo AutoMatch"),
     ("Transfo AutoMatch DQR value", "Calculé"),
     ("Transfo AutoMatch Details", GROUPING),
-    ("UserValidation EF Yes/No", "UserValidation"),
-    ("UserValidation EF Rationale", "UserValidation"),
-    ("UserValidation EF Name", "UserValidation"),
-    ("UserValidation EF Rationale (2)", "UserValidation"),
-    ("UserValidation EF Value", "UserValidation"),
-    ("UserValidation EF Unit", "UserValidation"),
-    ("UserValidation EF Geography", "UserValidation"),
-    ("UserValidation EF Source", "UserValidation"),
-    ("UserValidation EF PDS", "UserValidation"),
-    ("UserValidation GEO DQR", "UserValidation"),
-    ("UserValidation TECH DQR", "UserValidation"),
-    ("UserValidation TEMP DQR", "UserValidation"),
-    ("UserValidation DQR value", "Calculé"),
+    ("RM UserValidation EF Yes/No", "UserValidation"),
+    ("RM UserValidation EF Rationale", "UserValidation"),
+    ("RM UserValidation EF Name", "UserValidation"),
+    ("RM UserValidation EF Rationale (2)", "UserValidation"),
+    ("RM UserValidation EF Value", "UserValidation"),
+    ("RM UserValidation EF Unit", "UserValidation"),
+    ("RM UserValidation EF Geography", "UserValidation"),
+    ("RM UserValidation EF Source", "UserValidation"),
+    ("RM UserValidation EF PDS", "UserValidation"),
+    ("RM UserValidation GEO DQR", "UserValidation"),
+    ("RM UserValidation TECH DQR", "UserValidation"),
+    ("RM UserValidation TEMP DQR", "UserValidation"),
+    ("RM UserValidation DQR value", "Calculé"),
     ("UserValidation", GROUPING),
     ("Transfo UserValidation Process Name", "Transfo UserValidation"),
     ("Transfo UserValidation Process EF Name", "Transfo UserValidation"),
@@ -217,12 +217,12 @@ GROUPING_RANGES = [
     ("UVP description", "Recycled %"),
     ("RM AutoMatch EF Name", "RM AutoMatch TEMP DQR"),
     ("Transfo AutoMatch Process Name", "Transfo AutoMatch TEMP DQR"),
-    ("UserValidation EF Yes/No", "UserValidation TEMP DQR"),
+    ("RM UserValidation EF Yes/No", "RM UserValidation TEMP DQR"),
     ("Transfo UserValidation Process Name", "Transfo UserValidation TEMP DQR"),
 ]
 
 NUMBER_FORMATS = {
-    "Component Pack unit box": "0.000",
+    "Component Pack Unit box": "0.000",
     "Recycled %": "0.00%",
     "RM AutoMatch EF Value": "0.00000",
     "RM AutoMatch EF PDS": "0.00%",
@@ -236,12 +236,12 @@ NUMBER_FORMATS = {
     "Transfo AutoMatch TECH DQR": "0.000",
     "Transfo AutoMatch TEMP DQR": "0.000",
     "Transfo AutoMatch DQR value": "0.000",
-    "UserValidation EF Value": "0.00000",
-    "UserValidation EF PDS": "0.00%",
-    "UserValidation GEO DQR": "0.000",
-    "UserValidation TECH DQR": "0.000",
-    "UserValidation TEMP DQR": "0.000",
-    "UserValidation DQR value": "0.000",
+    "RM UserValidation EF Value": "0.00000",
+    "RM UserValidation EF PDS": "0.00%",
+    "RM UserValidation GEO DQR": "0.000",
+    "RM UserValidation TECH DQR": "0.000",
+    "RM UserValidation TEMP DQR": "0.000",
+    "RM UserValidation DQR value": "0.000",
     "Transfo UserValidation Process EF Value": "0.00000",
     "Transfo UserValidation PDS value": "0.00%",
     "Transfo UserValidation GEO DQR": "0.000",
@@ -251,7 +251,7 @@ NUMBER_FORMATS = {
 }
 
 LIST_RULES = {
-    "UserValidation EF Yes/No": '"Yes,No"',
+    "RM UserValidation EF Yes/No": '"Yes,No"',
     "Data validation flag impact": '"High,Medium,Low,No impact"',
 }
 
@@ -281,7 +281,7 @@ def _flag_formula(row: int) -> str:
         ),
         (
             f'IF(AND({sku}<>"",{c("RM AutoMatch EF Name")}="",'
-            f'{c("UserValidation EF Name")}=""),'
+            f'{c("RM UserValidation EF Name")}=""),'
             f'"No EF associated to the material (High);","")'
         ),
         _pds_flag(c("RM AutoMatch EF PDS")),
@@ -289,12 +289,12 @@ def _flag_formula(row: int) -> str:
         _pds_flag(c("Transfo AutoMatch PDS value")),
         _dqr_flag(c("Transfo AutoMatch DQR value")),
         (
-            f'IF(AND({c("UserValidation EF Yes/No")}="Yes",'
-            f'{c("UserValidation EF Name")}=""),'
+            f'IF(AND({c("RM UserValidation EF Yes/No")}="Yes",'
+            f'{c("RM UserValidation EF Name")}=""),'
             f'"User validation without EF name (High);","")'
         ),
-        _pds_flag(c("UserValidation EF PDS")),
-        _dqr_flag(c("UserValidation DQR value")),
+        _pds_flag(c("RM UserValidation EF PDS")),
+        _dqr_flag(c("RM UserValidation DQR value")),
         _pds_flag(c("Transfo UserValidation PDS value")),
         _dqr_flag(c("Transfo UserValidation DQR value")),
     ]
@@ -305,11 +305,11 @@ def _defaults(row: int) -> dict[str, object]:
     return {
         "RM AutoMatch EF PDS": 0,
         "Transfo AutoMatch PDS value": 0,
-        "UserValidation EF PDS": 0,
+        "RM UserValidation EF PDS": 0,
         "Transfo UserValidation PDS value": 0,
         "RM AutoMatch DQR value": _dqr_formula("RM AutoMatch", row),
         "Transfo AutoMatch DQR value": _dqr_formula("Transfo AutoMatch", row),
-        "UserValidation DQR value": _dqr_formula("UserValidation", row),
+        "RM UserValidation DQR value": _dqr_formula("RM UserValidation", row),
         "Transfo UserValidation DQR value": _dqr_formula("Transfo UserValidation", row),
         "Data validation flag": _flag_formula(row),
     }
@@ -342,7 +342,7 @@ def build_ef_matching_rows(collecte: pd.DataFrame, matching: pd.DataFrame | None
             "Component Supplier Code": _first_valid(lines, "Supplier code"),
             "Component Supplier Name": _first_valid(lines, "Supplier Name"),
             "Component Supplier Country": supplier_country(_first_valid(lines, "Supplier code")),
-            "Component Pack unit box": _first_valid(lines, "Pack unit box"),
+            "Component Pack Unit box": _first_valid(lines, "Pack unit box"),
             "UVP description": _first_valid(lines, "UVP description"),
             "Raw Material (MB Product)": _first_valid(lines, "Raw Material"),
             "Raw Material - Carbon Footprint": _first_valid(lines, "Raw Material - Carbon Footprint"),
@@ -437,9 +437,9 @@ def _build_sheet(wb, rows: list[dict]):
         "Transfo AutoMatch GEO DQR",
         "Transfo AutoMatch TECH DQR",
         "Transfo AutoMatch TEMP DQR",
-        "UserValidation GEO DQR",
-        "UserValidation TECH DQR",
-        "UserValidation TEMP DQR",
+        "RM UserValidation GEO DQR",
+        "RM UserValidation TECH DQR",
+        "RM UserValidation TEMP DQR",
         "Transfo UserValidation GEO DQR",
         "Transfo UserValidation TECH DQR",
         "Transfo UserValidation TEMP DQR",
