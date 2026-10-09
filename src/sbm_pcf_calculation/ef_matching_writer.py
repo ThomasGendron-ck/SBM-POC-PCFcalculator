@@ -319,7 +319,41 @@ def _defaults(row: int) -> dict[str, object]:
     }
 
 
-def build_ef_matching_rows(collecte: pd.DataFrame, matching: pd.DataFrame | None) -> list[dict]:
+def _session_lookups(component_database, product_database, materials_and_factors):
+    """Indexes de secours (spéc v0.98) quand la collecte n'a pas la valeur :
+    - UVP description : MB_Product ZUVP_DES ;
+    - Raw Material - Carbon Footprint : CK_MaterialPurchase RawMat_Hypothesis
+      (ligne de plus gros poids) ;
+    - Recycled % : MB_Product ZRECYCLE puis CK_MaterialPurchase Taux Recyclé.
+    """
+    mb_products: dict[str, dict] = {}
+    if product_database is not None:
+        pdf = product_database
+        if "SKU" not in pdf.columns:
+            pdf = pdf.rename(columns={pdf.columns[0]: "SKU"})
+        for _, r in pdf.iterrows():
+            mb_products[str(r["SKU"]).strip()] = r.to_dict()
+    ck_by_comp: dict[str, dict] = {}
+    if component_database is not None and "PRODUCT" in component_database.columns:
+        ordered = component_database.sort_values(
+            "Weight_KGTotal", ascending=False, na_position="last"
+        )
+        for comp_ref, rows in ordered.groupby("PRODUCT"):
+            with_ef = rows[rows["Prod_EF_Value"].fillna(0) > 0] if "Prod_EF_Value" in rows.columns else rows
+            candidates = with_ef if not with_ef.empty else rows
+            ck_by_comp[str(comp_ref)] = candidates.iloc[0].to_dict()
+    return mb_products, ck_by_comp
+
+
+def _sku_variants(sku: str) -> list[str]:
+    """Clés candidates : SKU brut et SKU sans zéros de tête (000001/1)."""
+    s = str(sku).strip()
+    stripped = s.lstrip("0")
+    return [s] if not stripped or stripped == s else [s, stripped]
+
+
+def build_ef_matching_rows(collecte: pd.DataFrame, matching: pd.DataFrame | None,
+                          lcia_base=None, component_database=None, product_database=None) -> list[dict]:
     """Une ligne par composant sans FE, pré-remplie depuis la collecte et le matching ecoinvent."""
     no_fe = collecte[collecte["RM EF Value"].isna() & collecte["Component SKU"].notna()].copy()
     if no_fe.empty:
@@ -334,23 +368,46 @@ def build_ef_matching_rows(collecte: pd.DataFrame, matching: pd.DataFrame | None
         vals = vals[vals.astype(str).str.strip() != ""]
         return vals.iloc[0] if not vals.empty else None
 
+    mb_products, ck_by_comp = _session_lookups(component_database, product_database, None)
+    transfo_cache: dict[str, pd.DataFrame] = {}
     rows: list[dict] = []
     for sku, lines in no_fe.groupby("Component SKU"):
         first = lines.iloc[0]
+        comp_sku_str = str(sku)
+        mb_row = next((mb_products[k] for k in _sku_variants(sku) if k in mb_products), None)
+        ck_row = next((ck_by_comp[k] for k in _sku_variants(sku) if k in ck_by_comp), None)
+        supplier_code = _first_valid(lines, "Supplier code")
+        uvp = _first_valid(lines, "UVP description")
+        if not uvp and mb_row is not None and "ZUVP_DES" in mb_row:
+            uvp = str(mb_row["ZUVP_DES"]).strip() if pd.notna(mb_row["ZUVP_DES"]) else None
+        rm_cf = _first_valid(lines, "Raw Material - Carbon Footprint")
+        if not rm_cf and ck_row is not None and "RawMat_Hypothesis" in ck_row:
+            rm_cf = str(ck_row["RawMat_Hypothesis"]).strip() if pd.notna(ck_row["RawMat_Hypothesis"]) else None
+        recycled = _first_valid(lines, "Recycled %")
+        if recycled is None and mb_row is not None and "ZRECYCLE" in mb_row and pd.notna(mb_row["ZRECYCLE"]):
+            try:
+                recycled = float(mb_row["ZRECYCLE"])
+            except (TypeError, ValueError):
+                recycled = None
+        if recycled is None and ck_row is not None and "Taux Recyclé" in ck_row and pd.notna(ck_row["Taux Recyclé"]):
+            try:
+                recycled = float(ck_row["Taux Recyclé"])
+            except (TypeError, ValueError):
+                recycled = None
         row = {
             "Component SKU": sku,
             "Component Designation": _first_valid(lines, "Component Designation") or first["Component Designation"],
             "Component Category Code": _first_valid(lines, "Category Code"),
             "Component Category description": _first_valid(lines, "Category description"),
             "Component Carbon category": _first_valid(lines, "Carbon category"),
-            "Component Supplier Code": _first_valid(lines, "Supplier code"),
+            "Component Supplier Code": supplier_code,
             "Component Supplier Name": _first_valid(lines, "Supplier Name"),
-            "Component Supplier Country": supplier_country(_first_valid(lines, "Supplier code")),
+            "Component Supplier Country": supplier_country(supplier_code),
             "Component Pack Unit box": _first_valid(lines, "Pack unit box"),
-            "UVP description": _first_valid(lines, "UVP description"),
+            "UVP description": uvp,
             "Raw Material (MB Product)": _first_valid(lines, "Raw Material"),
-            "Raw Material - Carbon Footprint": _first_valid(lines, "Raw Material - Carbon Footprint"),
-            "Recycled %": _first_valid(lines, "Recycled %"),
+            "Raw Material - Carbon Footprint": rm_cf,
+            "Recycled %": recycled,
         }
         m = match_by_sku.get(str(sku))
         if m is not None and m["Statut"] == "MATCHÉ" and pd.notna(m["FE proposé (kg CO2e/kg)"]):
@@ -369,6 +426,31 @@ def build_ef_matching_rows(collecte: pd.DataFrame, matching: pd.DataFrame | None
                     "RM AutoMatch TEMP DQR": dqr["RM TEMP DQR"],
                 }
             )
+        transfo_text = " ".join(
+            str(x) for x in [row.get("Raw Material (MB Product)"), row.get("Component Designation"), row.get("Component Category Code"), row.get("Component Category description")] if x
+        )
+        if lcia_base is not None and transfo_text.strip():
+            from .ecoinvent import match_transfo_process
+
+            transfo_ds, transfo_rule = match_transfo_process(
+                lcia_base, transfo_text, row.get("RM AutoMatch EF Geography") or row.get("Component Supplier Country"), transfo_cache
+            )
+            if transfo_ds is not None:
+                t_dqr = compute_dqr(transfo_ds["geo"], EF_SOURCE, True)
+                row.update(
+                    {
+                        "Transfo AutoMatch Process Name": str(transfo_ds["prod"]),
+                        "Transfo AutoMatch EF Rationale": transfo_rule,
+                        "Transfo AutoMatch Process EF Name": transfo_ds["name"],
+                        "Transfo AutoMatch Process EF Value": round(float(transfo_ds["gwp_per_unit"]), 5),
+                        "Transfo AutoMatch Process EF Unit": "kgCO2e/kg",
+                        "Transfo AutoMatch Process EF Source": EF_SOURCE,
+                        "Transfo AutoMatch PDS value": 0,
+                        "Transfo AutoMatch GEO DQR": t_dqr["RM GEO DQR"],
+                        "Transfo AutoMatch TECH DQR": t_dqr["RM TECH DQR"],
+                        "Transfo AutoMatch TEMP DQR": t_dqr["RM TEMP DQR"],
+                    }
+                )
         rows.append(row)
     return rows
 
@@ -485,12 +567,18 @@ def write_ef_matching(
     collecte: pd.DataFrame,
     matching: pd.DataFrame | None = None,
     template_path: str | Path | None = None,
+    lcia_base=None,
+    component_database=None,
+    product_database=None,
 ) -> int:
     """Génère le fichier EF matching en un seul onglet (EF Matching).
 
     Retourne le nombre de composants sans FE écrits.
     """
-    rows = build_ef_matching_rows(collecte, matching)
+    rows = build_ef_matching_rows(
+        collecte, matching, lcia_base=lcia_base,
+        component_database=component_database, product_database=product_database,
+    )
     wb = Workbook()
     if "Sheet" in wb.sheetnames:
         del wb["Sheet"]
