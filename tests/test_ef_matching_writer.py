@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from sbm_pcf_calculation.ef_matching import (
+from sbm_pcf_calculation.ef_matching_writer import (
     EF_MATCHING_COLUMNS,
     EF_MATCHING_SHEET,
     HEADER_BLOCKS,

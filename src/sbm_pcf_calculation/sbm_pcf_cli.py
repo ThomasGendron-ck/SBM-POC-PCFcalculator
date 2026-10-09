@@ -108,7 +108,7 @@ def cmd_ef_match(args) -> int:
     print(f"Matched: {n}/{len(matching)}")
     out = Path(args.output or "ef_matching.xlsx")
     if session.component_results is not None:
-        from .ef_matching import write_ef_matching as write_ef_matching_full
+        from .ef_matching_writer import write_ef_matching as write_ef_matching_full
         n_rows = write_ef_matching_full(str(out), session.component_results, matching=matching)
         print(f"Composants sans FE listés (spec v0.97) : {n_rows}")
     else:
