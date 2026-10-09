@@ -196,7 +196,7 @@ def missing_fe_components(collecte: pd.DataFrame) -> pd.DataFrame:
     restent dans la liste pour validation), avec les champs de la spec
     MissingEF_Matching."""
     if "RM EF Source" in collecte.columns:
-        automatched = collecte["RM EF Source"].astype(str).str.startswith("EcoInvent")
+        automatched = collecte["RM EF Source"].astype(str).str.contains("validé SBM", regex=False)
     else:
         automatched = pd.Series(False, index=collecte.index)
     no_fe = collecte[

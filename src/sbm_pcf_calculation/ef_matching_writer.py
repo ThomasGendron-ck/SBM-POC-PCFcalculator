@@ -359,7 +359,7 @@ def build_ef_matching_rows(collecte: pd.DataFrame, matching: pd.DataFrame | None
     restent listés avec leur bloc RM AutoMatch pré-rempli), pré-remplie depuis la
     collecte, les sources de session et le matching ecoinvent."""
     if "RM EF Source" in collecte.columns:
-        automatched = collecte["RM EF Source"].astype(str).str.startswith("EcoInvent")
+        automatched = collecte["RM EF Source"].astype(str).str.contains("validé SBM", regex=False)
     else:
         automatched = pd.Series(False, index=collecte.index)
     no_fe = collecte[
