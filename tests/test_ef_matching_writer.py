@@ -111,7 +111,7 @@ def test_write_file(tmp_path):
     from openpyxl import load_workbook
 
     wb = load_workbook(str(out))
-    assert EF_MATCHING_SHEET in wb.sheetnames
+    assert wb.sheetnames == [EF_MATCHING_SHEET]
     ws = wb[EF_MATCHING_SHEET]
     headers = [ws.cell(row=2, column=i).value for i in range(1, ws.max_column + 1)]
     for (header, _), excel_header in zip(EF_MATCHING_COLUMNS, headers):

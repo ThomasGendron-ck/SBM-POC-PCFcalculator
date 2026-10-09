@@ -19,7 +19,7 @@ matière, recyclé) issus de la collecte.
 from pathlib import Path
 
 import pandas as pd
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -28,7 +28,6 @@ from .collect import compute_dqr
 from .datashare import (
     DATA_END_ROW,
     DATA_START_ROW,
-    DEFAULT_TEMPLATE,
     GROUPING,
     HEADER_ROW,
     MANDATORY_ROW,
@@ -324,23 +323,30 @@ def build_ef_matching_rows(collecte: pd.DataFrame, matching: pd.DataFrame | None
     match_by_sku: dict[str, pd.Series] = {}
     if matching is not None and not matching.empty:
         match_by_sku = {str(r["Component SKU"]): r for _, r in matching.iterrows()}
+    def _first_valid(lines: pd.DataFrame, col: str):
+        if col not in lines.columns:
+            return None
+        vals = lines[col].dropna()
+        vals = vals[vals.astype(str).str.strip() != ""]
+        return vals.iloc[0] if not vals.empty else None
+
     rows: list[dict] = []
     for sku, lines in no_fe.groupby("Component SKU"):
         first = lines.iloc[0]
         row = {
             "Component SKU": sku,
-            "Component Designation": first["Component Designation"],
-            "Component Category Code": first["Category Code"],
-            "Component Category description": first["Category description"],
-            "Component Carbon category": first["Carbon category"],
-            "Component Supplier Code": first["Supplier code"],
-            "Component Supplier Name": first["Supplier Name"],
-            "Component Supplier Country": supplier_country(first["Supplier code"]),
-            "Component Pack unit box": first["Pack unit box"],
-            "UVP description": first.get("UVP description"),
-            "Raw Material (MB Product)": first["Raw Material"],
-            "Raw Material - Carbon Footprint": first.get("Raw Material - Carbon Footprint"),
-            "Recycled %": first["Recycled %"] if pd.notna(first["Recycled %"]) else None,
+            "Component Designation": _first_valid(lines, "Component Designation") or first["Component Designation"],
+            "Component Category Code": _first_valid(lines, "Category Code"),
+            "Component Category description": _first_valid(lines, "Category description"),
+            "Component Carbon category": _first_valid(lines, "Carbon category"),
+            "Component Supplier Code": _first_valid(lines, "Supplier code"),
+            "Component Supplier Name": _first_valid(lines, "Supplier Name"),
+            "Component Supplier Country": supplier_country(_first_valid(lines, "Supplier code")),
+            "Component Pack unit box": _first_valid(lines, "Pack unit box"),
+            "UVP description": _first_valid(lines, "UVP description"),
+            "Raw Material (MB Product)": _first_valid(lines, "Raw Material"),
+            "Raw Material - Carbon Footprint": _first_valid(lines, "Raw Material - Carbon Footprint"),
+            "Recycled %": _first_valid(lines, "Recycled %"),
         }
         m = match_by_sku.get(str(sku))
         if m is not None and m["Statut"] == "MATCHÉ" and pd.notna(m["FE proposé (kg CO2e/kg)"]):
@@ -476,20 +482,14 @@ def write_ef_matching(
     matching: pd.DataFrame | None = None,
     template_path: str | Path | None = None,
 ) -> int:
-    """Génère le fichier EF matching (guides du template + onglet EF Matching).
+    """Génère le fichier EF matching en un seul onglet (EF Matching).
 
     Retourne le nombre de composants sans FE écrits.
     """
     rows = build_ef_matching_rows(collecte, matching)
-    template = Path(template_path) if template_path else DEFAULT_TEMPLATE
-    if template.is_file():
-        wb = load_workbook(template)
-    else:
-        wb = Workbook()
-        if "Sheet" in wb.sheetnames:
-            del wb["Sheet"]
+    wb = Workbook()
+    if "Sheet" in wb.sheetnames:
+        del wb["Sheet"]
     _build_sheet(wb, rows)
-    if EF_MATCHING_SHEET in wb.sheetnames:
-        wb.move_sheet(EF_MATCHING_SHEET, offset=len(wb.sheetnames))
     wb.save(output_path)
     return len(rows)
