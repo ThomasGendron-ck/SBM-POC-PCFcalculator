@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .collect import build_collecte, build_fe_overrides, resolve_inputs
 from .ecoinvent import load_lcia_gwp, match_missing_fe
+from .ef_matching import write_ef_matching
 from .extract import extract
 from .report import write_collecte_report, write_report
 from .saisie import write_saisie_transformation
@@ -60,6 +61,7 @@ def main_collecte(argv=None) -> int:
     parser.add_argument("--lcia", default=None, help="Fichier Cut-off Cumulative LCIA ecoinvent (.xlsx) : ajoute l'onglet Matching ecoinvent (FE manquants -> ICV GWP100 EF v3.1)")
     parser.add_argument("--transformation", default=None, help="Fichier de saisie de transformation rempli par SBM (.xlsx) : alimente les colonnes du bloc Impact fabrication fournisseur")
     parser.add_argument("--saisie", default=None, help="Chemin du fichier de saisie de transformation à générer (.xlsx), pré-rempli avec les couples produit/composant")
+    parser.add_argument("--ef-matching", default=None, help="Chemin du fichier EF matching à générer (.xlsx, spec v0.97 MissingEF_Matching) : une ligne par composant sans FE, pré-rempli avec les matchings ecoinvent")
     args = parser.parse_args(argv)
 
     if not Path(args.input).is_dir():
@@ -109,6 +111,12 @@ def main_collecte(argv=None) -> int:
         saisie_path.parent.mkdir(parents=True, exist_ok=True)
         print(f"Génération du fichier de saisie transformation : {saisie_path}")
         write_saisie_transformation(collecte, str(saisie_path))
+    if args.ef_matching:
+        ef_matching_path = Path(args.ef_matching)
+        ef_matching_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Génération du fichier EF matching (spec v0.97) : {ef_matching_path}")
+        n_sans_fe = write_ef_matching(str(ef_matching_path), collecte, matching=matching)
+        print(f"Composants sans FE listés : {n_sans_fe}")
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     print(f"Écriture du fichier : {output}")
