@@ -65,10 +65,36 @@ def cmd_collect(args) -> int:
     session = _load_session(args)
     from .datashare import apply_v093
 
+    spec_path = args.spec
+    material_path = args.material
+    mb_product_path = args.mb_product
+    if args.input_file is None and (spec_path is None or material_path is None):
+        input_dir = session.metadata.get("input_dir") or (args.input if getattr(args, "input", None) else None)
+        if input_dir:
+            from .collect import resolve_inputs
+
+            resolved = resolve_inputs(input_dir)
+            if spec_path is None:
+                spec_path = str(resolved["produits_lm"])
+            if material_path is None:
+                material_path = str(resolved["material"])
+            if mb_product_path is None:
+                mb_product_path = str(resolved.get("mb_products", "")) or None
+            print(f"Sources résolues depuis {input_dir} :")
+            print(f"  Référencement LM (spec) : {spec_path}")
+            print(f"  Material and Packaging  : {material_path}")
+            if mb_product_path:
+                print(f"  Masterbase products    : {mb_product_path}")
+        else:
+            print(
+                "Aucune source disponible : lancez d'abord 'sbm-pcf load --input <dossier>' "
+                "ou passez --spec/--material pour pré-remplir le fichier de collecte.",
+                file=sys.stderr,
+            )
     print(f"Generating collection file -> {args.output}")
     counts = apply_v093(args.output, input_path=args.input_file, template_path=None,
-                         spec_path=args.spec, material_path=args.material,
-                         mb_product_path=args.mb_product)
+                         spec_path=spec_path, material_path=material_path,
+                         mb_product_path=mb_product_path)
     if counts is not None:
         print(f"Pre-filled: {counts[0]} products, {counts[1]} components.")
     print("Done.")
