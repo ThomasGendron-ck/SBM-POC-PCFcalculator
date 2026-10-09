@@ -145,6 +145,19 @@ class TestBuildPcfSheet:
         sheet = build_pcf_sheet(component_lines, product_results)
         assert (sheet["Data validation flag"] == "HIGH").all()
 
+    def test_v098_new_columns_and_renames(self, component_lines):
+        sheet = build_pcf_sheet(component_lines)
+        assert "Product Supplier Country" in sheet.columns
+        assert "Component Supplier Country" in sheet.columns
+        assert "RM EF Geography" in sheet.columns
+        assert "Prod_EF_Geography" not in sheet.columns
+        assert sheet.loc[0, "RM EF Geography"] == "RER"
+
+    def test_freight_total_distance_mapped(self, component_lines):
+        component_lines["Freight Total Distance"] = 1450.5
+        sheet = build_pcf_sheet(component_lines)
+        assert sheet.loc[0, "Freight Total Distance"] == 1450.5
+
 
 class TestBuildMissingEfSheet:
     def test_only_components_without_ef(self, component_lines):

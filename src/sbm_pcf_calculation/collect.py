@@ -186,6 +186,8 @@ n      composant, fournisseur, UniqueKey et GHG_perunit normalisées ;
         config.FREIGHT_UNIQUEKEY_COL,
         config.FREIGHT_ADDRESSKEY_COL,
         config.FREIGHT_MODE_COL,
+        config.FREIGHT_SUPPLIER_COUNTRY_COL,
+        *config.FREIGHT_MODE_VALUE_COLS,
     ]
     ck = load_sheet_columns(freight_path, config.FREIGHT_CK_SHEET, config.FREIGHT_CK_HEADER_ROW, ck_needed)
     ck = ck[ck[config.FREIGHT_FRET_TYPE_COL].fillna("").str.startswith(config.FREIGHT_FRET_TYPE_PREFIX)].copy()
@@ -196,11 +198,26 @@ n      composant, fournisseur, UniqueKey et GHG_perunit normalisées ;
     )
     for col in (config.FREIGHT_UNIQUEKEY_COL, config.FREIGHT_ADDRESSKEY_COL, config.FREIGHT_MODE_COL):
         ck[col] = ck[col].map(_text)
+    if config.FREIGHT_SUPPLIER_COUNTRY_COL in ck.columns:
+        ck[config.FREIGHT_SUPPLIER_COUNTRY_COL] = ck[config.FREIGHT_SUPPLIER_COUNTRY_COL].map(_text)
+    for col in config.FREIGHT_MODE_VALUE_COLS:
+        if col in ck.columns:
+            ck[col] = pd.to_numeric(ck[col], errors="coerce")
     ck_dedup = (
         ck.groupby(config.FREIGHT_UNIQUEKEY_COL, as_index=False)[
-            [config.FREIGHT_FRET_TYPE_COL, config.FREIGHT_ADDRESSKEY_COL, config.FREIGHT_MODE_COL]
+            [
+                c
+                for c in [
+                    config.FREIGHT_FRET_TYPE_COL,
+                    config.FREIGHT_ADDRESSKEY_COL,
+                    config.FREIGHT_MODE_COL,
+                    config.FREIGHT_SUPPLIER_COUNTRY_COL,
+                    *config.FREIGHT_MODE_VALUE_COLS,
+                ]
+                if c in ck.columns
+            ]
         ]
-        .first()
+        .agg(lambda s: s.dropna().iloc[0] if not s.dropna().empty else None)
     )
     ck_dedup = ck_dedup.set_index(config.FREIGHT_UNIQUEKEY_COL, drop=False)
     return raw, ck_dedup
@@ -258,9 +275,19 @@ def _lookup_freight(
             if ck_rows.empty:
                 continue
             ck_row = ck_rows.iloc[0]
+        distances = [
+            ck_row.get(col)
+            for col in config.FREIGHT_MODE_VALUE_COLS
+            if col in ck_row.index and pd.notna(ck_row.get(col))
+        ]
+        total_distance = sum(float(d) for d in distances) if distances else None
         return {
             "Freight Route": ck_row[config.FREIGHT_ADDRESSKEY_COL],
             "Freight Transportation Mode": ck_row[config.FREIGHT_MODE_COL],
+            "Freight Total Distance": total_distance,
+            "Freight Supplier Country": ck_row.get(config.FREIGHT_SUPPLIER_COUNTRY_COL)
+            if config.FREIGHT_SUPPLIER_COUNTRY_COL in ck_row.index
+            else None,
             "Flux fret": ck_row[config.FREIGHT_FRET_TYPE_COL],
             "ghg_perunit": row["ghg_perunit"],
         }
@@ -517,6 +544,9 @@ def build_collecte(
             "Product Gross Weight": _num(prod["GROSS_WEIGHT0"]) if prod is not None else np.nan,
             "Product Supplier Code": code_prod,
             "Product Supplier Name": fournisseur_prod,
+            "Product Supplier Country": _text(prod["SUPPLIER_COUNTRY"])
+            if prod is not None and "SUPPLIER_COUNTRY" in prod and pd.notna(prod["SUPPLIER_COUNTRY"])
+            else None,
         }
         if not fournisseur_prod:
             flags_produit.append(FLAG_FOURNISSEUR_INTROUVABLE)
@@ -657,6 +687,10 @@ def build_collecte(
                     "RM EF PDS": 0.0,
                     "RM PDS value": activity_pds * 0.0,
                     "Prod_EF_Geography": fe_geo,
+                    "RM EF Geography": fe_geo,
+                    "Component Supplier Country": _text(ck_row["SUPPLIER_COUNTRY"])
+                    if ck_row is not None and "SUPPLIER_COUNTRY" in ck_row and pd.notna(ck_row["SUPPLIER_COUNTRY"])
+                    else freight_info.get("Freight Supplier Country"),
                     **dqr,
                     "RM GHG": ghg,
                     "RM GHG Unit": UNIT_GHG,
@@ -674,8 +708,10 @@ def build_collecte(
                     "Transformation GHG Unit": None,
                     "Freight Supplier Code": code_fournisseur,
                     "Freight Supplier Name": fournisseur,
+                    "Freight Supplier Country": freight_info.get("Freight Supplier Country"),
                     "Freight Route": freight_info.get("Freight Route"),
                     "Freight Transportation Mode": freight_info.get("Freight Transportation Mode"),
+                    "Freight Total Distance": freight_info.get("Freight Total Distance"),
                     "Freight GHG": (
                         freight_info["ghg_perunit"] * qty * item_weight
                         if "ghg_perunit" in freight_info

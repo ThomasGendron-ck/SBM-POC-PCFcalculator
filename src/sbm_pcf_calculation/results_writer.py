@@ -119,6 +119,7 @@ PCF_COLUMN_MAP: dict[str, str] = {
     "Supplier code": "Component Supplier Code",
     "Supplier Name": "Component Supplier Name",
     "Stock unit": "Component Stock unit",
+    "Prod_EF_Geography": "RM EF Geography",
     "Net Weight Unit": "Component Net Weight Unit",
     "Gross Weight Unit": "Component Gross Weight Unit",
     "Product Net Weight Unit": "Product Net Weight Unit",
@@ -324,6 +325,16 @@ def _style_sheet(ws, columns: list[tuple[str, str | None]],
     # Freeze at C3: two header rows + two identifying columns.
     ws.freeze_panes = "C3"
     ws.auto_filter.ref = f"A2:{get_column_letter(len(columns))}{data_end_row}"
+    # Largeurs de colonnes ajustees au contenu (en-tete + donnees, echantillon 200).
+    for idx, name in enumerate(sheet_columns, start=1):
+        if block_of(name) == GROUPING:
+            continue
+        longest = len(name)
+        for row_idx in range(3, data_end_row + 1):
+            value = ws.cell(row=row_idx, column=idx).value
+            if value is not None and not str(value).startswith("="):
+                longest = max(longest, len(str(value)))
+        ws.column_dimensions[get_column_letter(idx)].width = min(max(longest + 2, 10), 45)
 
 
 def _missing_ef_block(name: str) -> str:
@@ -418,6 +429,14 @@ def _style_synthese_sheet(ws, synthese: pd.DataFrame) -> None:
     ws.freeze_panes = "C2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(SYNTHESE_COLUMNS))}{data_end_row}"
     ws.sheet_properties.tabColor = SYNTHESE_TAB_FILL
+    # Largeurs ajustees au contenu (en-tete + donnees, echantillon 200).
+    for col_idx, col in enumerate(SYNTHESE_COLUMNS, start=1):
+        widths = [min(len(col), 18)]
+        for value in synthese[col].head(200) if col in synthese.columns else []:
+            if value is None or (isinstance(value, float) and pd.isna(value)):
+                continue
+            widths.append(len(str(value)))
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max(widths) + 2, 40)
 
 
 def write_pcf_results(output_path: str | Path,
